@@ -1,0 +1,14 @@
+# Local Environment
+.env
+
+# Dependencies
+/node_modules
+
+# Build artifacts
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log* 
+
+# Plugin storage
+data.json

@@ -1,0 +1,10 @@
+{
+  "id": "vision-insights",
+  "name": "Vision Insights",
+  "version": "1.0.0",
+  "minAppVersion": "0.15.0",
+  "description": "AI-powered image analysis for Obsidian with contextual insights",
+  "author": "Patrick Metzdorf",
+  "authorUrl": "https://github.com/batjko",
+  "isDesktopOnly": false
+} 

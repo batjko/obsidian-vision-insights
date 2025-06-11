@@ -1,0 +1,172 @@
+import { App, Modal, Editor, MarkdownView, Setting, Notice } from 'obsidian';
+import { AnalysisResult, InsertionMode } from './types';
+import VisionInsightsPlugin from '../main';
+
+export class ResultsModal extends Modal {
+  private result: AnalysisResult;
+  private editor: Editor;
+  private view: MarkdownView;
+
+  constructor(app: App, private plugin: VisionInsightsPlugin) {
+    super(app);
+  }
+
+  show(result: AnalysisResult, editor: Editor, view: MarkdownView) {
+    this.result = result;
+    this.editor = editor;
+    this.view = view;
+    this.open();
+  }
+
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    // Title
+    contentEl.createEl('h2', { text: `Vision Insights: ${this.getActionTitle(this.result.action)}` });
+    
+    // Image info
+    const imageInfo = contentEl.createDiv('image-info');
+    imageInfo.createEl('p', { 
+      text: `📸 Image: ${this.result.imageInfo.filename}`,
+      cls: 'image-filename'
+    });
+    
+    if (this.result.cached) {
+      imageInfo.createEl('span', { 
+        text: '⚡ Cached result',
+        cls: 'cached-indicator'
+      });
+    }
+
+    // Results content
+    const resultContent = contentEl.createDiv('result-content');
+    resultContent.createEl('div', { 
+      text: this.result.content,
+      cls: 'analysis-result'
+    });
+
+    // Action buttons
+    const buttonContainer = contentEl.createDiv('button-container');
+    
+    // Primary actions (top row)
+    const primaryRow = buttonContainer.createDiv('button-row');
+    
+    new Setting(primaryRow)
+      .addButton(btn => btn
+        .setButtonText('Insert at Cursor')
+        .setCta()
+        .onClick(() => this.insertResult('cursor')))
+      .addButton(btn => btn
+        .setButtonText('Copy to Clipboard')
+        .onClick(() => this.copyToClipboard()));
+
+    // Secondary actions (bottom row)
+    const secondaryRow = buttonContainer.createDiv('button-row');
+    
+    new Setting(secondaryRow)
+      .addButton(btn => btn
+        .setButtonText('Insert as Quote')
+        .onClick(() => this.insertResult('quote')))
+      .addButton(btn => btn
+        .setButtonText('Insert as Callout')
+        .onClick(() => this.insertResult('callout')))
+      .addButton(btn => btn
+        .setButtonText('Save to New Note')
+        .onClick(() => this.insertResult('new-note')));
+  }
+
+  private getActionTitle(action: string): string {
+    const titles: Record<string, string> = {
+      'smart-summary': 'Smart Summary',
+      'extract-facts': 'Key Facts',
+      'generate-description': 'Description',
+      'identify-text': 'Text Content',
+      'analyze-structure': 'Structure Analysis',
+      'quick-insights': 'Quick Insights'
+    };
+    return titles[action] || action;
+  }
+
+  private async insertResult(mode: InsertionMode) {
+    try {
+      const formattedContent = this.formatContent(this.result.content, mode);
+      
+      switch (mode) {
+        case 'cursor':
+          this.editor.replaceSelection(formattedContent);
+          break;
+          
+        case 'quote':
+          this.editor.replaceSelection(`> ${formattedContent.replace(/\n/g, '\n> ')}\n> \n> *Source: ${this.result.imageInfo.filename}*`);
+          break;
+          
+        case 'callout':
+          const calloutType = this.getCalloutType(this.result.action);
+          this.editor.replaceSelection(`> [!${calloutType}] ${this.getActionTitle(this.result.action)}\n> ${formattedContent.replace(/\n/g, '\n> ')}`);
+          break;
+          
+        case 'new-note':
+          await this.createNewNote();
+          break;
+          
+        case 'daily-note':
+          await this.appendToDailyNote();
+          break;
+      }
+      
+      new Notice(`Inserted ${this.getActionTitle(this.result.action)} result`);
+      this.close();
+    } catch (error) {
+      new Notice(`Error inserting result: ${error.message}`);
+    }
+  }
+
+  private formatContent(content: string, mode: InsertionMode): string {
+    // Basic formatting - could be enhanced based on mode
+    return content.trim();
+  }
+
+  private getCalloutType(action: string): string {
+    const calloutTypes: Record<string, string> = {
+      'smart-summary': 'summary',
+      'extract-facts': 'info',
+      'generate-description': 'note',
+      'identify-text': 'quote',
+      'analyze-structure': 'tip',
+      'quick-insights': 'example'
+    };
+    return calloutTypes[action] || 'info';
+  }
+
+  private async copyToClipboard() {
+    await navigator.clipboard.writeText(this.result.content);
+    new Notice('Copied to clipboard');
+  }
+
+  private async createNewNote() {
+    const timestamp = new Date().toISOString().split('T')[0];
+    const filename = `Vision Analysis - ${this.result.imageInfo.filename} - ${timestamp}.md`;
+    
+    const content = `# Vision Analysis: ${this.getActionTitle(this.result.action)}
+
+**Image:** ${this.result.imageInfo.filename}
+**Analysis:** ${this.getActionTitle(this.result.action)}
+**Date:** ${new Date().toLocaleDateString()}
+
+## Results
+
+${this.result.content}
+
+---
+*Generated by Vision Insights plugin*`;
+
+    await this.app.vault.create(filename, content);
+    new Notice(`Created note: ${filename}`);
+  }
+
+  private async appendToDailyNote() {
+    // This would integrate with daily notes plugin if available
+    new Notice('Daily note integration not yet implemented');
+  }
+} 
