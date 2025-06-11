@@ -1,4 +1,4 @@
-# Vision Insights
+# Obsidian Vision Insights
 
 AI-powered image analysis for Obsidian with contextual insights using OpenAI's Vision API.
 
