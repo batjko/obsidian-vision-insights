@@ -2,6 +2,12 @@
   "name": "vision-insights",
   "version": "1.0.0",
   "description": "AI-powered image analysis for Obsidian",
+  "author": "Patrick Metzdorf",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/batjko/obsidian-vision-insights"
+  },
   "main": "main.js",
   "scripts": {
     "dev": "node scripts/setup-dev.mjs && node esbuild.config.mjs",
