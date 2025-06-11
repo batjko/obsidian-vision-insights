@@ -16,7 +16,9 @@ const DEFAULT_SETTINGS: VisionInsightsSettings = {
     'identify-text',
     'analyze-structure',
     'quick-insights',
-    'analyze-data-viz'
+    'analyze-data-viz',
+    'extract-meeting-participants',
+    'analyze-meeting-content'
   ],
   defaultInsertionMode: 'cursor',
   cacheResults: true,
@@ -136,7 +138,9 @@ export default class VisionInsightsPlugin extends Plugin {
       { action: 'identify-text', title: '🔤 Identify Text (OCR)', icon: 'type' },
       { action: 'analyze-structure', title: '🏗️ Analyze Structure', icon: 'network' },
       { action: 'quick-insights', title: '💡 Quick Insights', icon: 'lightbulb' },
-      { action: 'analyze-data-viz', title: '📈 Analyze Data Visualization', icon: 'bar-chart' }
+      { action: 'analyze-data-viz', title: '📈 Analyze Data Visualization', icon: 'bar-chart' },
+      { action: 'extract-meeting-participants', title: '👥 Extract Meeting Participants', icon: 'users' },
+      { action: 'analyze-meeting-content', title: '🎥 Analyze Meeting Content', icon: 'video' }
     ];
 
     for (const config of actionConfigs) {

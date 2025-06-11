@@ -5,7 +5,9 @@ export type VisionAction =
   | 'identify-text'
   | 'analyze-structure'
   | 'quick-insights'
-  | 'analyze-data-viz';
+  | 'analyze-data-viz'
+  | 'extract-meeting-participants'
+  | 'analyze-meeting-content';
 
 export type InsertionMode = 
   | 'cursor' 

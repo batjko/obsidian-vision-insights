@@ -8,15 +8,17 @@ Vision Insights is an Obsidian plugin that brings AI-powered image analysis dire
 
 ## Features
 
-### 🎯 **7 Specialized Analysis Actions**
+### 🎯 **9 Specialized Analysis Actions**
 
 - **📝 Smart Summary** - Focused 2-3 sentence summaries capturing core messages and key takeaways
-- **📊 Extract Key Facts** - Organized bulleted lists of specific data points, metrics, and actionable items  
+- **📊 Extract Key Facts** - Organized bulleted lists of specific data points, metrics, and actionable items
 - **🖼️ Generate Description** - Comprehensive visual descriptions for accessibility and archival purposes
 - **🔤 Identify Text (OCR)** - Complete text extraction with preserved formatting and structure
 - **🏗️ Analyze Structure** - Detailed breakdown of organizational patterns and information architecture
 - **💡 Quick Insights** - 4-6 actionable insights that go beyond surface-level observations
 - **📈 Analyze Data Visualization** - Specialized analysis for charts, graphs, and data visualizations
+- **👥 Extract Meeting Participants** - List all visible meeting participants, names, avatars, and roles from screenshots
+- **🗂️ Analyze Meeting Content** - Comprehensive analysis of meeting screenshots, shared content, context, and action items
 
 ### 🚀 **Smart Integration**
 
