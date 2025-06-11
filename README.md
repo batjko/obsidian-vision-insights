@@ -46,6 +46,7 @@ Vision Insights is an Obsidian plugin that brings AI-powered image analysis dire
 1. Download the latest release from the [releases page](https://github.com/batjko/obsidian-vision-insights/releases)
 2. Extract the files to your vault's plugins folder: `VaultFolder/.obsidian/plugins/vision-insights/`
 3. Reload Obsidian and enable the plugin in Community Plugins
+4. Add your OpenAI API key in the settings and enable whichever context actions you want.
 
 ### Development Installation
 
@@ -227,22 +228,8 @@ npm run release    # Create release package
 - **Image Processing** - Images sent to OpenAI for analysis according to their privacy policy
 - **No Telemetry** - Plugin doesn't collect or transmit usage data
 
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Support
-
-- **Issues**: [GitHub Issues](https://github.com/batjko/obsidian-vision-insights/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/batjko/obsidian-vision-insights/discussions)
-- **Author**: [Patrick Metzdorf](https://github.com/batjko)
-
 ## Acknowledgments
 
 - Built for the [Obsidian](https://obsidian.md) knowledge management platform
 - Powered by [OpenAI's Vision API](https://platform.openai.com/docs/guides/vision)
 - Inspired by the Obsidian community's innovation in knowledge tools
-
----
-
-**Made with ❤️ for the Obsidian community** 
