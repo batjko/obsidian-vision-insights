@@ -47,17 +47,111 @@ function execCommand(command, silent = false) {
   }
 }
 
-function checkGitStatus() {
+async function checkGitStatus() {
   info('Checking git status...');
   
   try {
     const status = execCommand('git status --porcelain', true);
     if (status) {
-      error('Working directory is not clean. Please commit or stash your changes.');
+      // Check if changes are only in version-related files
+      const lines = status.split('\n').filter(line => line.trim());
+      const versionFiles = ['package.json', 'manifest.json', 'versions.json'];
+      const nonVersionChanges = lines.filter(line => {
+        const file = line.substring(3); // Remove git status prefix
+        return !versionFiles.includes(file);
+      });
+      
+      if (nonVersionChanges.length > 0) {
+        warning('Working directory has uncommitted changes:');
+        nonVersionChanges.forEach(line => console.log(`  ${line}`));
+        warning('Please commit or stash non-version changes before releasing.');
+        
+        // Ask user if they want to continue
+        const readline = require('readline');
+        const rl = readline.createInterface({
+          input: process.stdin,
+          output: process.stdout
+        });
+        
+        const shouldContinue = await new Promise((resolve) => {
+          rl.question('Continue anyway? (y/N): ', (answer) => {
+            rl.close();
+            resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
+          });
+        });
+        
+        if (!shouldContinue) {
+          error('Release cancelled by user.');
+        }
+      } else if (lines.length > 0) {
+        info('Only version-related files have changes (will be handled automatically)');
+      }
     }
-    success('Working directory is clean');
+    success('Git status check passed');
   } catch (err) {
     error('Failed to check git status');
+  }
+}
+
+function promptForVersionType() {
+  const readline = require('readline');
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  return new Promise((resolve) => {
+    console.log('\nSelect version bump type:');
+    console.log('1. patch (1.0.0 → 1.0.1) - Bug fixes');
+    console.log('2. minor (1.0.0 → 1.1.0) - New features (backward compatible)');
+    console.log('3. major (1.0.0 → 2.0.0) - Breaking changes');
+    console.log('4. skip - Use current version');
+    
+    rl.question('\nEnter your choice (1-4): ', (answer) => {
+      rl.close();
+      
+      const choices = {
+        '1': 'patch',
+        '2': 'minor', 
+        '3': 'major',
+        '4': 'skip'
+      };
+      
+      const choice = choices[answer];
+      if (!choice) {
+        error('Invalid choice. Please run the script again.');
+      }
+      
+      resolve(choice);
+    });
+  });
+}
+
+function updateVersion(versionType) {
+  if (versionType === 'skip') {
+    info('Skipping version bump...');
+    const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+    return packageJson.version;
+  }
+
+  info(`Bumping ${versionType} version...`);
+  
+  try {
+    // Use npm version to bump package.json and create git tag
+    const newVersion = execCommand(`npm version ${versionType} --no-git-tag-version`, true);
+    const version = newVersion.replace('v', ''); // Remove 'v' prefix if present
+    
+    // Update manifest.json
+    const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+    manifest.version = version;
+    fs.writeFileSync('manifest.json', JSON.stringify(manifest, null, 2));
+    
+    success(`Version bumped to ${version}`);
+    success(`Updated package.json and manifest.json`);
+    
+    return version;
+  } catch (err) {
+    error(`Failed to bump version: ${err.message}`);
   }
 }
 
@@ -73,6 +167,25 @@ function checkVersionSync() {
   
   success(`Version synchronized: ${packageJson.version}`);
   return packageJson.version;
+}
+
+function updateVersionsFile(version) {
+  info('Updating versions.json...');
+  
+  const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+  const minAppVersion = manifest.minAppVersion;
+  
+  let versions = {};
+  if (fs.existsSync('versions.json')) {
+    versions = JSON.parse(fs.readFileSync('versions.json', 'utf8'));
+  }
+  
+  // Add current version with its minimum app version
+  versions[version] = minAppVersion;
+  
+  // Write back to file with proper formatting
+  fs.writeFileSync('versions.json', JSON.stringify(versions, null, 2));
+  success(`Updated versions.json with ${version}: ${minAppVersion}`);
 }
 
 function checkRemoteSync() {
@@ -140,7 +253,7 @@ function buildPlugin() {
 
 function checkRequiredFiles() {
   const requiredFiles = ['main.js', 'manifest.json'];
-  const optionalFiles = ['styles.css'];
+  const optionalFiles = ['styles.css', 'versions.json'];
   
   const missingFiles = requiredFiles.filter(file => !fs.existsSync(file));
   if (missingFiles.length > 0) {
@@ -181,7 +294,7 @@ function createGitHubRelease(version, assetFiles) {
       
     } catch (err) {
       // Release doesn't exist, create it
-      const command = `gh release create v${version} ${assetFiles.join(' ')} --generate-notes`;
+      const command = `gh release create v${version} ${assetFiles.join(' ')} --title "v${version}" --generate-notes`;
       execCommand(command);
       success(`Created release v${version} with assets`);
     }
@@ -195,18 +308,33 @@ function createGitHubRelease(version, assetFiles) {
   }
 }
 
-function main() {
+async function main(directVersionType) {
   log('🚀 Starting release process...', 'blue');
   
   // Pre-flight checks
   checkGitHubCLI();
-  checkGitStatus();
-  const version = checkVersionSync();
+  await checkGitStatus();
   checkRemoteSync();
+  
+  // Version management
+  const versionType = directVersionType || await promptForVersionType();
+  const version = updateVersion(versionType);
   
   // Build and validate
   buildPlugin();
+  updateVersionsFile(version);
   const assetFiles = checkRequiredFiles();
+  
+  // Commit version changes
+  if (versionType !== 'skip') {
+    info('Committing version changes...');
+    execCommand('git add package.json manifest.json versions.json');
+    execCommand(`git commit -m "chore: bump version to ${version}"`);
+    execCommand(`git tag v${version}`);
+    execCommand('git push origin main');
+    execCommand('git push origin --tags');
+    success('Version changes committed and tagged');
+  }
   
   // Create release
   createGitHubRelease(version, assetFiles);
@@ -218,5 +346,15 @@ function main() {
   log(`• Update any documentation that references the version`);
 }
 
+// Parse command line arguments
+const args = process.argv.slice(2);
+const versionTypeArg = args.find(arg => ['patch', 'minor', 'major', 'skip'].includes(arg));
+
 // Run the release process
-main(); 
+if (versionTypeArg) {
+  // Direct version type specified
+  main(versionTypeArg);
+} else {
+  // Interactive mode
+  main();
+} 

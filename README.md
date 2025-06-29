@@ -194,6 +194,36 @@ npm run build      # Production build
 npm run release    # Create release package
 ```
 
+### Release Process
+
+This plugin uses semantic versioning. To create a new release:
+
+**Interactive Release**
+```bash
+npm run release
+```
+This will prompt you to select the type of version bump (patch, minor, or major).
+
+**Direct Release**
+```bash
+npm run release:patch   # For bug fixes (1.0.0 → 1.0.1)
+npm run release:minor   # For new features (1.0.0 → 1.1.0)  
+npm run release:major   # For breaking changes (1.0.0 → 2.0.0)
+```
+
+The release script will:
+1. Bump the version in `package.json`, `manifest.json`, and `versions.json`
+2. Build the plugin
+3. Commit and tag the changes
+4. Push to GitHub
+5. Create a GitHub release with the built assets
+
+**Manual Release**
+If you need to release the current version without bumping:
+```bash
+node scripts/release.mjs skip
+```
+
 ### Contributing
 
 1. The usual: Fork and submit a pull request
