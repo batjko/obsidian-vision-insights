@@ -9,10 +9,11 @@
     "noImplicitAny": true,
     "moduleResolution": "node",
     "importHelpers": true,
-    "declarationMap": true,
     "lib": ["DOM", "ES6"],
     "outDir": ".",
-    "typeRoots": ["node_modules/@types"]
+    "typeRoots": ["node_modules/@types"],
+    "skipLibCheck": true
   },
-  "include": ["**/*.ts"]
+  "include": ["main.ts", "src/**/*.ts"],
+  "exclude": ["node_modules"]
 } 
