@@ -1,5 +1,5 @@
 import { App, TFile, Editor, MarkdownView } from 'obsidian';
-import { VisionInsightsSettings, ImageInfo } from './types';
+import { VisionInsightsSettings, ImageInfo, NoteContext } from './types';
 import { arrayBufferToBase64, getMimeType } from './utils';
 
 export class ImageHandler {
@@ -36,6 +36,60 @@ export class ImageHandler {
     }
 
     return null;
+  }
+
+  extractNoteContext(editor: Editor, view: MarkdownView, imageInfo: ImageInfo): NoteContext {
+    const noteName = view.file?.basename || 'Untitled';
+    const allText = editor.getValue();
+
+    // Find the specific image in the note content
+    const imagePattern = this.createImageSearchPattern(imageInfo);
+    const match = allText.match(imagePattern);
+    
+    if (match) {
+      const matchIndex = match.index!;
+      const matchLength = match[0].length;
+      
+      // Split content around the actual image
+      const textBefore = allText.substring(0, matchIndex).trim();
+      const textAfter = allText.substring(matchIndex + matchLength).trim();
+      
+      return {
+        textBefore,
+        textAfter,
+        noteName
+      };
+    }
+
+    // Fallback: if we can't find the specific image, return empty context
+    console.warn('Vision Insights: Could not locate image in note content for context extraction');
+    return {
+      textBefore: '',
+      textAfter: '',
+      noteName
+    };
+  }
+
+  private createImageSearchPattern(imageInfo: ImageInfo): RegExp {
+    // Create a regex pattern to find this specific image in the markdown content
+    // Need to handle different image formats: ![[image.png]], ![](image.png), <img src="image.png">
+    
+    // Escape special regex characters in the image path/URL
+    const escapedPath = imageInfo.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const escapedImagePath = imageInfo.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    
+    // Create patterns for different markdown image formats
+    const patterns = [
+      `!\\[\\[${escapedPath}\\]\\]`,                    // ![[image.png]]
+      `!\\[\\[${escapedImagePath}\\]\\]`,               // ![[path/image.png]]
+      `!\\[[^\\]]*?\\]\\(${escapedPath}\\)`,           // ![alt](image.png)
+      `!\\[[^\\]]*?\\]\\(${escapedImagePath}\\)`,      // ![alt](path/image.png)
+      `<img[^>]+src=["']${escapedPath}["'][^>]*>`,      // <img src="image.png">
+      `<img[^>]+src=["']${escapedImagePath}["'][^>]*>`  // <img src="path/image.png">
+    ];
+    
+    // Combine all patterns with OR operator
+    return new RegExp(patterns.join('|'), 'i');
   }
 
   createImageInfoFromFile(file: TFile): ImageInfo | null {

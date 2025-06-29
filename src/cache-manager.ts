@@ -1,4 +1,4 @@
-import { CacheEntry, ImageInfo, VisionAction } from './types';
+import { CacheEntry, ImageInfo, VisionAction, NoteContext } from './types';
 import { hashString } from './utils';
 import VisionInsightsPlugin from '../main';
 
@@ -9,12 +9,12 @@ export class CacheManager {
     this.loadCache();
   }
 
-  getCachedResult(imageInfo: ImageInfo, action: VisionAction): string | null {
+  getCachedResult(imageInfo: ImageInfo, action: VisionAction, noteContext?: NoteContext): string | null {
     if (!this.plugin.settings.cacheResults) {
       return null;
     }
 
-    const cacheKey = this.generateCacheKey(imageInfo, action);
+    const cacheKey = this.generateCacheKey(imageInfo, action, noteContext);
     const entry = this.cache.get(cacheKey);
     
     if (!entry) {
@@ -32,12 +32,12 @@ export class CacheManager {
     return entry.result;
   }
 
-  cacheResult(imageInfo: ImageInfo, action: VisionAction, result: string) {
+  cacheResult(imageInfo: ImageInfo, action: VisionAction, result: string, noteContext?: NoteContext) {
     if (!this.plugin.settings.cacheResults) {
       return;
     }
 
-    const cacheKey = this.generateCacheKey(imageInfo, action);
+    const cacheKey = this.generateCacheKey(imageInfo, action, noteContext);
     const entry: CacheEntry = {
       result,
       timestamp: Date.now(),
@@ -49,15 +49,29 @@ export class CacheManager {
     this.saveCache();
   }
 
-  private generateCacheKey(imageInfo: ImageInfo, action: VisionAction): string {
+  private generateCacheKey(imageInfo: ImageInfo, action: VisionAction, noteContext?: NoteContext): string {
     const imageHash = this.hashImageInfo(imageInfo);
-    return `${imageHash}-${action}`;
+    let key = `${imageHash}-${action}`;
+    
+    // Include note context in cache key to ensure same image in different contexts gets cached separately
+    if (noteContext) {
+      const contextHash = this.hashNoteContext(noteContext);
+      key += `-${contextHash}`;
+    }
+    
+    return key;
   }
 
   private hashImageInfo(imageInfo: ImageInfo): string {
     // Create a hash based on image path/url and basic info
     const hashInput = `${imageInfo.path}-${imageInfo.filename}-${imageInfo.mimeType}`;
     return hashString(hashInput);
+  }
+
+  private hashNoteContext(noteContext: NoteContext): string {
+    // Create a hash based on note context to differentiate same image in different contexts
+    const contextInput = `${noteContext.noteName}-${noteContext.textBefore.substring(0, 200)}-${noteContext.textAfter.substring(0, 200)}`;
+    return hashString(contextInput);
   }
 
   clearCache() {

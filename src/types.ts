@@ -16,6 +16,12 @@ export type InsertionMode =
   | 'new-note' 
   | 'daily-note';
 
+export interface NoteContext {
+  textBefore: string;
+  textAfter: string;
+  noteName: string;
+}
+
 export interface VisionInsightsSettings {
   openaiApiKey: string;
   preferredModel: 'gpt-4.1-mini' | 'gpt-4o-mini' | 'gpt-4o';

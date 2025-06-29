@@ -175,7 +175,10 @@ export default class VisionInsightsPlugin extends Plugin {
 
       new Notice(`Analyzing image with ${action.replace(/-/g, ' ')}...`);
 
-      const cachedResult: string | null = this.cacheManager.getCachedResult(imageInfo, action);
+      // Extract note context around the image
+      const noteContext = this.imageHandler.extractNoteContext(editor, view, imageInfo);
+
+      const cachedResult: string | null = this.cacheManager.getCachedResult(imageInfo, action, noteContext);
       if (cachedResult) {
         new Notice('Showing cached result.');
         this.showResults(
@@ -193,9 +196,9 @@ export default class VisionInsightsPlugin extends Plugin {
       }
 
       const imageData: ArrayBuffer | string = await this.imageHandler.prepareImageForAPI(imageInfo);
-      const result: string = await this.openaiClient.analyzeImage(imageData, action);
+      const result: string = await this.openaiClient.analyzeImage(imageData, action, noteContext);
 
-      this.cacheManager.cacheResult(imageInfo, action, result);
+      this.cacheManager.cacheResult(imageInfo, action, result, noteContext);
 
       this.showResults(
         {
