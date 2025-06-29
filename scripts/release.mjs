@@ -328,7 +328,7 @@ async function main(directVersionType) {
   // Commit version changes
   if (versionType !== 'skip') {
     info('Committing version changes...');
-    execCommand('git add package.json manifest.json versions.json');
+    execCommand('git add package.json package-lock.json manifest.json versions.json');
     execCommand(`git commit -m "chore: bump version to ${version}"`);
     execCommand(`git tag v${version}`);
     execCommand('git push origin main');
