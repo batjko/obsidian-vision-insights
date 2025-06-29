@@ -36,7 +36,7 @@ Vision Insights is an Obsidian plugin that brings AI-powered image analysis dire
 
 ## Installation
 
-### Via Obsidian Community Plugins (Recommended)
+### Via Obsidian Community Plugins (once available)
 
 1. Open Obsidian Settings
 2. Go to **Community Plugins** and disable **Safe Mode**
