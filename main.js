@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => VisionInsightsPlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
 
 // src/image-handler.ts
 var import_obsidian = require("obsidian");
@@ -104,17 +104,37 @@ var ImageHandler = class {
       const matchLength = match[0].length;
       const textBefore = allText.substring(0, matchIndex).trim();
       const textAfter = allText.substring(matchIndex + matchLength).trim();
+      const relatedLinks2 = this.extractRelatedWikiLinks(allText, matchIndex, matchLength, view);
+      const sectionData2 = this.extractSectionData(allText, matchIndex, view);
+      const meta2 = this.extractNoteMetadata(view);
       return {
         textBefore,
         textAfter,
-        noteName
+        noteName,
+        matchIndex,
+        matchLength,
+        relatedLinks: relatedLinks2,
+        sectionTitle: sectionData2.sectionTitle,
+        sectionPath: sectionData2.sectionPath,
+        sectionText: sectionData2.sectionText,
+        tags: meta2.tags,
+        frontmatter: meta2.frontmatter
       };
     }
     console.warn("Vision Insights: Could not locate image in note content for context extraction");
+    const relatedLinks = this.extractRelatedWikiLinks(allText, 0, 0, view);
+    const sectionData = this.extractSectionData(allText, 0, view);
+    const meta = this.extractNoteMetadata(view);
     return {
       textBefore: "",
       textAfter: "",
-      noteName
+      noteName,
+      relatedLinks,
+      sectionTitle: sectionData.sectionTitle,
+      sectionPath: sectionData.sectionPath,
+      sectionText: sectionData.sectionText,
+      tags: meta.tags,
+      frontmatter: meta.frontmatter
     };
   }
   createImageSearchPattern(imageInfo) {
@@ -213,7 +233,159 @@ var ImageHandler = class {
     }
     const arrayBuffer = await this.app.vault.readBinary(file);
     const base64 = arrayBufferToBase64(arrayBuffer);
-    return `data:${imageInfo.mimeType};base64,${base64}`;
+    let dataUrl = `data:${imageInfo.mimeType};base64,${base64}`;
+    if (this.settings.downscaleImages && this.settings.maxImageDimension && imageInfo.mimeType.startsWith("image/")) {
+      try {
+        dataUrl = await this.downscaleDataUrl(dataUrl, this.settings.maxImageDimension);
+      } catch (e) {
+        console.warn("Vision Insights: Downscale failed, using original image.", e);
+      }
+    }
+    return dataUrl;
+  }
+  async downscaleDataUrl(dataUrl, maxDim) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const largest = Math.max(img.width, img.height);
+        const scale = Math.min(1, maxDim / largest);
+        if (scale >= 1)
+          return resolve(dataUrl);
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext("2d");
+        if (!ctx)
+          return resolve(dataUrl);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.9));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+  extractAllImagesInNote(editor, view) {
+    var _a2;
+    const results = [];
+    const content = editor.getValue();
+    const noteName = ((_a2 = view.file) == null ? void 0 : _a2.basename) || "Untitled";
+    const imageRegex = /(!\[\[([^\]]+?)\]\])|(!\[[^\]]*?\]\((.*?)\))|(<img[^>]+src=["'](.*?)["'][^>]*>)/g;
+    let match;
+    while ((match = imageRegex.exec(content)) !== null) {
+      const imagePath = match[2] || match[4] || match[6];
+      if (!imagePath)
+        continue;
+      const info = this.createImageInfo(decodeURIComponent(imagePath), view);
+      if (!info)
+        continue;
+      const matchIndex = match.index;
+      const matchLength = match[0].length;
+      const textBefore = content.substring(0, matchIndex).trim();
+      const textAfter = content.substring(matchIndex + matchLength).trim();
+      const relatedLinks = this.extractRelatedWikiLinks(content, matchIndex, matchLength, view);
+      const sectionData = this.extractSectionData(content, matchIndex, view);
+      const meta = this.extractNoteMetadata(view);
+      const nc = {
+        textBefore,
+        textAfter,
+        noteName,
+        matchIndex,
+        matchLength,
+        relatedLinks,
+        sectionTitle: sectionData.sectionTitle,
+        sectionPath: sectionData.sectionPath,
+        sectionText: sectionData.sectionText,
+        tags: meta.tags,
+        frontmatter: meta.frontmatter
+      };
+      results.push({ imageInfo: info, noteContext: nc });
+    }
+    return results;
+  }
+  extractRelatedWikiLinks(allText, matchIndex, matchLength, view) {
+    var _a2, _b, _c;
+    const windowRadius = 800;
+    const start = Math.max(0, matchIndex - windowRadius);
+    const end = Math.min(allText.length, matchIndex + matchLength + windowRadius);
+    const windowText = allText.slice(start, end);
+    const linkRegex = /\[\[([^\]|\n]+)(?:\|([^\]]+))?\]\]/g;
+    const results = [];
+    let m;
+    while ((m = linkRegex.exec(windowText)) !== null) {
+      const target = m[1].trim();
+      const alias = (m[2] || "").trim();
+      const sourcePath = ((_a2 = view.file) == null ? void 0 : _a2.path) || "";
+      const file = this.app.metadataCache.getFirstLinkpathDest(target, sourcePath);
+      if (!file || !(file instanceof import_obsidian.TFile))
+        continue;
+      const cache = this.app.metadataCache.getFileCache(file);
+      let excerpt = "";
+      if ((cache == null ? void 0 : cache.sections) && cache.sections.length > 0) {
+        excerpt = ((_c = (_b = cache == null ? void 0 : cache.headings) == null ? void 0 : _b[0]) == null ? void 0 : _c.heading) || "";
+      }
+      if (!excerpt) {
+        excerpt = file.basename;
+      }
+      results.push({
+        linkText: alias || target,
+        path: file.path,
+        title: file.basename,
+        excerpt
+      });
+    }
+    return results;
+  }
+  extractSectionData(allText, anchorIndex, view) {
+    var _a2;
+    const headingRegex = /^ {0,3}(#{1,6})\s+(.+)$/gm;
+    const headings = [];
+    let m;
+    while ((m = headingRegex.exec(allText)) !== null) {
+      headings.push({ level: m[1].length, title: m[2].trim(), index: m.index });
+    }
+    const path = [];
+    let sectionTitle = "";
+    let sectionStart = 0;
+    let sectionEnd = allText.length;
+    for (let i = 0; i < headings.length; i++) {
+      const h = headings[i];
+      if (h.index <= anchorIndex) {
+        while (path.length >= h.level)
+          path.pop();
+        path.push(h.title);
+        sectionTitle = h.title;
+        sectionStart = h.index + ((_a2 = m == null ? void 0 : m[0]) == null ? void 0 : _a2.length) || h.index;
+        for (let j = i + 1; j < headings.length; j++) {
+          if (headings[j].level <= h.level) {
+            sectionEnd = headings[j].index;
+            break;
+          }
+        }
+      } else {
+        break;
+      }
+    }
+    const sectionText = allText.slice(sectionStart, sectionEnd).trim().slice(0, 1200);
+    return { sectionTitle, sectionPath: path, sectionText };
+  }
+  extractNoteMetadata(view) {
+    const file = view.file;
+    const cache = file ? this.app.metadataCache.getFileCache(file) : void 0;
+    const frontmatter = (cache == null ? void 0 : cache.frontmatter) || void 0;
+    const tags = [];
+    if (cache == null ? void 0 : cache.tags) {
+      for (const t of cache.tags) {
+        if (t.tag)
+          tags.push(t.tag.replace(/^#/, ""));
+      }
+    }
+    if ((cache == null ? void 0 : cache.frontmatter) && Array.isArray(cache.frontmatter.tags)) {
+      for (const t of cache.frontmatter.tags) {
+        if (typeof t === "string")
+          tags.push(t.replace(/^#/, ""));
+      }
+    }
+    return { frontmatter, tags };
   }
 };
 
@@ -6601,6 +6773,163 @@ OpenAI.Containers = Containers;
 OpenAI.ContainerListResponsesPage = ContainerListResponsesPage;
 var openai_default = OpenAI;
 
+// src/prompts.ts
+function getObsidianFormatting(settings) {
+  const language = settings.outputLanguage && settings.outputLanguage !== "auto" ? `
+- Write in ${settings.outputLanguage} language.` : "";
+  return `
+
+**FORMATTING (Obsidian Markdown):**
+- Use pure Markdown (no HTML).
+- Prefer short sections with headings, lists, and tables when useful.
+- Keep content concise and skimmable; avoid meta commentary.
+- Use [[Wiki Links]] for people, organizations, products, frameworks, and notable concepts (e.g., [[John Doe]], [[Microsoft Teams]], [[React]]).
+- For code or commands, use fenced code blocks.
+- Do not include system messages, apologies, or disclaimers.${language}`;
+}
+function buildContext(noteContext) {
+  var _a2, _b, _c;
+  if (!noteContext)
+    return "";
+  let section = `
+
+**NOTE CONTEXT:**
+This image is embedded in a note titled "${noteContext.noteName}".`;
+  if ((_a2 = noteContext.textBefore) == null ? void 0 : _a2.trim())
+    section += `
+
+**Text BEFORE this image:**
+${noteContext.textBefore}`;
+  if ((_b = noteContext.textAfter) == null ? void 0 : _b.trim())
+    section += `
+
+**Text AFTER this image:**
+${noteContext.textAfter}`;
+  if (noteContext.relatedLinks && noteContext.relatedLinks.length) {
+    const links = noteContext.relatedLinks.slice(0, 5).map((l) => `- [[${l.title}]] \u2014 ${l.excerpt}`).join("\n");
+    section += `
+
+**Related Links (nearby):**
+${links}`;
+  }
+  if (noteContext.sectionTitle) {
+    section += `
+
+**Section:** ${((_c = noteContext.sectionPath) == null ? void 0 : _c.join(" > ")) || noteContext.sectionTitle}`;
+  }
+  if (noteContext.sectionText) {
+    section += `
+
+**Section Text:**
+${noteContext.sectionText}`;
+  }
+  if (noteContext.tags && noteContext.tags.length) {
+    section += `
+
+**Tags:** ${noteContext.tags.map((t) => `#${t}`).join(" ")}`;
+  }
+  section += `
+
+Please consider this context when analyzing the image.`;
+  return section;
+}
+function buildPrompt(action, settings, noteContext, customPrompt) {
+  const contextSection = buildContext(noteContext);
+  const obsidianFormatting = getObsidianFormatting(settings);
+  const prompts = {
+    "smart-summary": [
+      "Analyze this image and produce a focused summary for research notes.",
+      "Output structure:\n## Key Takeaways (2\u20134 bullets)\n- Start each bullet with a bold keyword\n## One-liner\n- A single sentence capturing the essence.",
+      "Highlight specific metrics, findings, or conclusions if visible.",
+      noteContext ? "Incorporate relevance to the surrounding note context where appropriate." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "extract-facts": [
+      "Extract specific, verifiable facts and data points explicitly shown or stated in the image.",
+      "Output structure:\n## Facts\n- Group related facts; one fact per bullet\n- Include units and exact wording when relevant\n## Notes (optional)\n- Clarify ambiguities without speculation.",
+      noteContext ? "Relate facts to the surrounding note context when it improves clarity." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "generate-description": [
+      "Create an accessibility-grade visual description for archival and screen reader use.",
+      "Output structure:\n## Overview\n- Composition and purpose\n## Elements\n- Key objects and relationships\n## Text Content\n- Headings and body text summary\n## Visual Style\n- Colors, style, and formatting\n## Context\n- Implied meaning or intent.",
+      noteContext ? "Situate the description within the surrounding note context if relevant." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "identify-text": [
+      "Perform OCR extraction of ALL visible text, preserving structure and hierarchy.",
+      "If any text is illegible, mark it as [illegible] and do not paraphrase.",
+      "Output structure:\n## Headers\n- H1/H2/H3 as markdown headings\n## Body\n- Paragraphs as plain text\n## Labels & Captions\n- Short lines\n## Tables & Lists\n- Use markdown tables or lists\n## Annotations/Metadata\n- Any extra markings.",
+      "Use markdown to represent emphasis and headings. Avoid paraphrasing; prefer verbatim where legible.",
+      noteContext ? "Connect extracted text to the surrounding note context if it clarifies meaning." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "analyze-structure": [
+      "Analyze the organizational structure, IA, or workflow shown in the image.",
+      "Output structure:\n## Components\n- Main parts and roles\n## Relationships\n- Hierarchy, dependencies\n## Flow\n- Steps and sequence\n## Groupings\n- Clusters and categorization\n## Interfaces\n- Key connections and handoffs\n## Assessment\n- How the structure serves its purpose; patterns or principles.",
+      noteContext ? "Relate structure to themes in the surrounding note content where helpful." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "quick-insights": [
+      "Provide 4\u20136 actionable insights beyond surface-level observations.",
+      "Prioritize: non-obvious patterns, implications, connections to broader concepts, applications/use cases, and notable details.",
+      "Output bullets starting with bold leads and a short explanation.",
+      noteContext ? "Tie insights to the surrounding note context when it sharpens relevance." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "analyze-data-viz": [
+      "Analyze the chart/graph/visualization in detail.",
+      "Output structure:\n## Interpretation\n- What the data shows and significance\n## Methodology\n- Encoding, scales, and limitations\n## Key Findings\n- The most important takeaways\n## Context\n- What this suggests about the broader topic\n## Implications\n- Decisions or actions this supports.",
+      noteContext ? "Connect interpretation to the surrounding note narrative where useful." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "extract-meeting-participants": [
+      "Extract and list all identifiable meeting participants from the screenshot.",
+      "Include: name (use [[First Last]]), optionally role/title and status (muted/camera/chat/host).",
+      "If none are identifiable, list visible meeting interface elements instead.",
+      "Output as a clean bullet list.",
+      noteContext ? "Use surrounding note context if it helps disambiguate names or roles." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "analyze-meeting-content": [
+      "Analyze the meeting screenshot for both shared content and context.",
+      "Output structure:\n## Shared Content\n- Presentations/documents and key points\n## Context\n- Platform, layout, participant info\n## Key Information\n- Important text/data/decisions\n## Dynamics\n- Chat, reactions, presenter mode\n## Action Items\n- Explicit tasks, decisions, next steps.",
+      noteContext ? "Use surrounding note context to situate the meeting in a project timeline if visible." : ""
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
+    "custom-vision": [
+      "You are assisting with research note-taking in Obsidian. Follow the USER INSTRUCTIONS precisely and keep the output practical and skimmable.",
+      customPrompt ? `
+
+**USER INSTRUCTIONS:**
+${customPrompt}` : "No custom instructions provided.",
+      noteContext ? "Use the surrounding note context to tune relevance." : "",
+      "\n\nIf the user instruction could be interpreted in multiple ways, choose the interpretation that produces the most actionable, neatly structured notes."
+    ].filter(Boolean).join(" ") + contextSection + obsidianFormatting
+  };
+  return prompts[action];
+}
+function buildConsolidationPrompt(settings, overallAction, analyses, noteContext, customPrompt) {
+  const contextSection = buildContext(noteContext);
+  const obsidianFormatting = getObsidianFormatting(settings);
+  const header = `You are consolidating analyses from a sequence of related screenshots (same meeting/topic). Merge them into a single, coherent result.`;
+  const intent = customPrompt ? `
+
+USER INSTRUCTIONS (priority):
+${customPrompt}` : overallAction === "extract-facts" ? `
+
+GOAL: Produce a single consolidated set of key facts and data points. Deduplicate, reconcile conflicts, and keep only verifiable information.` : `
+
+GOAL: Produce a single consolidated output optimized for research notes. Deduplicate, reconcile conflicts, and emphasize the most important cross-image insights.`;
+  const guidance = `
+
+GUIDELINES:
+- Do not repeat per-image headings; merge into a unified structure.
+- Prefer concise bullets and short sections.
+- Preserve units, exact wording where relevant.
+- If contradictions exist, call them out and choose the most plausible interpretation.
+- If there are obvious groups/themes across images, organize by theme.
+- Keep only what is actionable and high-signal.`;
+  const inputs = `
+
+SOURCE ANALYSES (for consolidation):
+${analyses.map((a) => `### ${a.filename}
+
+${a.content}`).join("\n\n---\n\n")}`;
+  return [header, intent, contextSection, guidance, inputs, obsidianFormatting].join(" ");
+}
+
 // src/openai-client.ts
 var OpenAIClient = class {
   constructor(settings) {
@@ -6617,171 +6946,74 @@ var OpenAIClient = class {
       dangerouslyAllowBrowser: true
     });
   }
-  async analyzeImage(imageData, action, noteContext) {
+  async analyzeImage(imageData, action, noteContext, customPrompt) {
     if (!this.settings.openaiApiKey) {
       throw new Error("OpenAI API key not configured");
     }
-    const prompt = this.getPromptForAction(action, noteContext);
+    const prompt = buildPrompt(action, this.settings, noteContext, customPrompt);
     try {
-      const response = await this.makeAPICall(imageData, prompt, this.settings.preferredModel);
+      const response = await this.makeAPICall(imageData, prompt, action);
       return response;
     } catch (error) {
       if (error instanceof openai_default.APIError && error.code === "model_not_found") {
         console.warn(`Model ${this.settings.preferredModel} not found, falling back to gpt-4o-mini`);
-        return await this.makeAPICall(imageData, prompt, "gpt-4o-mini");
+        return await this.makeAPICall(imageData, prompt, action, "gpt-4o-mini");
       }
       throw error;
     }
   }
-  async makeAPICall(imageData, prompt, model) {
-    var _a2, _b;
+  async makeAPICall(imageData, prompt, action, overrideModel) {
+    var _a2, _b, _c, _d, _e, _f;
+    const perAction = ((_a2 = this.settings.perActionConfig) == null ? void 0 : _a2[action]) || {};
+    const model = overrideModel || perAction.model || this.settings.preferredModel;
+    const temperature = (_b = perAction.temperature) != null ? _b : 0.1;
+    const maxTokens = (_c = this.settings.maxOutputTokens) != null ? _c : 1500;
+    const detail = perAction.imageDetail || "auto";
     const response = await this.client.chat.completions.create({
       model,
       messages: [{
         role: "user",
         content: [
           { type: "text", text: prompt },
-          {
-            type: "image_url",
-            image_url: {
-              url: imageData,
-              detail: "auto"
-            }
-          }
+          { type: "image_url", image_url: { url: imageData, detail } }
         ]
       }],
-      max_tokens: 1500,
-      temperature: 0.1
+      max_tokens: maxTokens,
+      temperature
     });
-    const content = (_b = (_a2 = response.choices[0]) == null ? void 0 : _a2.message) == null ? void 0 : _b.content;
-    if (!content) {
+    const content = (_e = (_d = response.choices[0]) == null ? void 0 : _d.message) == null ? void 0 : _e.content;
+    if (!content)
       throw new Error("Invalid response from OpenAI API");
-    }
-    return content;
-  }
-  getPromptForAction(action, noteContext) {
-    let contextSection = "";
-    if (noteContext) {
-      contextSection = `
-
-**NOTE CONTEXT:**
-`;
-      contextSection += `This image is embedded in a note titled "${noteContext.noteName}".
-`;
-      if (noteContext.textBefore.trim()) {
-        contextSection += `
-**Text BEFORE this image:**
-${noteContext.textBefore}
-`;
-      }
-      if (noteContext.textAfter.trim()) {
-        contextSection += `
-**Text AFTER this image:**
-${noteContext.textAfter}
-`;
-      }
-      contextSection += `
-Please consider this context when analyzing the image to provide more relevant and contextualized insights.
-`;
-    }
-    const obsidianFormatting = `
-
-**FORMATTING:** This output is for an Obsidian note. Format any person names, technologies, systems, tools, companies, or notable concepts with wiki brackets, e.g. [[John Doe]], [[Microsoft Teams]], [[D365]], [[React]], etc. This enables proper linking within the knowledge base.`;
-    const prompts = {
-      "smart-summary": [
-        "Analyze this image and provide a focused 2-3 sentence summary that captures the core message and key takeaways.",
-        "Prioritize actionable information, important data, and context that would be valuable for future reference in research notes.",
-        "If there are specific metrics, findings, or conclusions shown, highlight them.",
-        noteContext ? "Consider how this image relates to and builds upon the surrounding note content." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "extract-facts": [
-        "Extract specific, verifiable facts and data points from this image.",
-        "Format as a bulleted list, grouping related facts together where appropriate.",
-        "Do not assume the presence of particular types of information\u2014capture only what is clearly shown or stated.",
-        "Add brief context to each fact if it aids clarity.",
-        noteContext ? "Pay attention to how these facts relate to the surrounding note context and any ongoing narrative or discussion." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "generate-description": [
-        "Create a comprehensive visual description of this image for accessibility and archival purposes.",
-        "Structure your response to include:",
-        "1) Overall composition and layout,",
-        "2) Primary visual elements and their relationships,",
-        "3) Text content and its hierarchy,",
-        "4) Colors, visual style, and formatting,",
-        "5) Context clues and implied meaning.",
-        "Write as if describing to someone who cannot see the image.",
-        noteContext ? "Consider how this visual content fits within the broader note context and purpose." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "identify-text": [
-        "Perform OCR extraction of ALL visible text in this image.",
-        "Maintain the original formatting, hierarchy, and structure.",
-        "Organize the output to reflect:",
-        "1) Headers and titles (with hierarchy levels),",
-        "2) Body text (paragraphs and sentences),",
-        "3) Labels and captions,",
-        "4) Data in tables or lists,",
-        "5) Any annotations or metadata.",
-        "Use markdown formatting to preserve structure and indicate text styling where relevant.",
-        noteContext ? "Consider how this extracted text connects to and continues the surrounding note content." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "analyze-structure": [
-        "Examine the organizational structure, information architecture, or workflow depicted in this image.",
-        "Identify:",
-        "1) Main components and their functions,",
-        "2) Hierarchical relationships and dependencies,",
-        "3) Information flow or process sequence,",
-        "4) Groupings and categorizations,",
-        "5) Key connections and interfaces.",
-        "Explain how the structure serves its purpose and note any patterns or design principles evident.",
-        noteContext ? "Relate this structural analysis to the broader context and themes present in the surrounding note content." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "quick-insights": [
-        "Provide 4-6 actionable insights that go beyond surface-level observations.",
-        "Look for:",
-        "1) Patterns or trends that might not be immediately obvious,",
-        "2) Implications or consequences of what's shown,",
-        "3) Connections to broader concepts or contexts,",
-        "4) Potential applications or use cases,",
-        "5) Notable details that add significant value.",
-        "Focus on insights that would be useful for someone building knowledge or making decisions.",
-        noteContext ? "Draw connections between the image content and the surrounding note context to provide more targeted insights." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "analyze-data-viz": [
-        "Analyze this data visualization, chart, graph, or diagram in detail.",
-        "Provide:",
-        "1) Data interpretation - what the numbers/trends show and their significance,",
-        "2) Methodology - how the data is presented and any limitations,",
-        "3) Key findings - the most important takeaways and conclusions,",
-        "4) Context - what this data suggests about the broader topic,",
-        "5) Actionable implications - how this information could be used or what decisions it supports.",
-        "Focus on making the data meaningful and accessible.",
-        noteContext ? "Connect this data analysis to the broader narrative and context established in the surrounding note content." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "extract-meeting-participants": [
-        "Extract and list all meeting participants visible in this screenshot.",
-        "Look for:",
-        "1) Participant names (from name tags, labels, or video tiles),",
-        "2) Participant avatars or profile pictures,",
-        "3) Status indicators (muted, camera on/off, hand raised, etc.),",
-        "4) Roles or titles if visible,",
-        "5) Host/presenter indicators.",
-        "Format as a clean bulleted list with names - surround any firstName lastName combinations with wiki brackets, e.g. [[John Doe]] - and any relevant status information.",
-        "If no participants are clearly identifiable, indicate what meeting interface elements are visible instead.",
-        noteContext ? "Consider the meeting context from the surrounding note content, such as meeting agenda or previous discussion topics." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting,
-      "analyze-meeting-content": [
-        "Analyze this meeting screenshot comprehensively, focusing on both the shared content and meeting context.",
-        "Provide:",
-        "1) **Shared Content Analysis** - describe any presentations, documents, or screen shares visible, including key points, slide titles, charts, or data,",
-        "2) **Meeting Context** - identify the meeting platform (Zoom, Teams, etc.), meeting layout, and participant information,",
-        "3) **Key Information** - extract important text, data, or decisions from the shared content,",
-        "4) **Meeting Dynamics** - note any visible interactions like chat messages, raised hands, or presenter mode,",
-        "5) **Action Items** - identify any explicit tasks, decisions, or next steps mentioned in the content.",
-        "Structure the response to be useful for meeting notes and follow-up.",
-        noteContext ? "Reference the surrounding note context to understand where this meeting fits in the broader discussion or project timeline." : ""
-      ].filter(Boolean).join(" ") + contextSection + obsidianFormatting
+    return {
+      content,
+      modelUsed: response.model || model,
+      tokens: (_f = response.usage) == null ? void 0 : _f.total_tokens
     };
-    return prompts[action];
+  }
+  async consolidateAnalyses(analyses, overallAction, noteContext, customPrompt) {
+    var _a2, _b, _c, _d, _e, _f;
+    if (!this.settings.openaiApiKey) {
+      throw new Error("OpenAI API key not configured");
+    }
+    const prompt = buildConsolidationPrompt(this.settings, overallAction, analyses, noteContext, customPrompt);
+    const perAction = ((_a2 = this.settings.perActionConfig) == null ? void 0 : _a2[overallAction]) || {};
+    const model = perAction.model || this.settings.preferredModel;
+    const temperature = (_b = perAction.temperature) != null ? _b : 0.2;
+    const maxTokens = (_c = this.settings.maxOutputTokens) != null ? _c : 1800;
+    const response = await this.client.chat.completions.create({
+      model,
+      messages: [{ role: "user", content: prompt }],
+      max_tokens: maxTokens,
+      temperature
+    });
+    const content = (_e = (_d = response.choices[0]) == null ? void 0 : _d.message) == null ? void 0 : _e.content;
+    if (!content)
+      throw new Error("Invalid response from OpenAI API");
+    return {
+      content,
+      modelUsed: response.model || model,
+      tokens: (_f = response.usage) == null ? void 0 : _f.total_tokens
+    };
   }
   async validateApiKey() {
     if (!this.client) {
@@ -6811,7 +7043,9 @@ var ResultsModal = class extends import_obsidian2.Modal {
     this.open();
   }
   onOpen() {
+    var _a2;
     const { contentEl } = this;
+    this.modalEl.addClass("vision-insights-modal");
     contentEl.empty();
     contentEl.createEl("h2", { text: `Vision Insights: ${this.getActionTitle(this.result.action)}` });
     const imageInfo = contentEl.createDiv("image-info");
@@ -6826,15 +7060,45 @@ var ResultsModal = class extends import_obsidian2.Modal {
       });
     }
     const resultContent = contentEl.createDiv("result-content");
-    resultContent.createEl("div", {
-      text: this.result.content,
-      cls: "analysis-result"
+    const toolbar = resultContent.createDiv({ cls: "result-toolbar" });
+    const toggleBtn = toolbar.createEl("button", { text: "Show raw" });
+    const rerunBtn = toolbar.createEl("button", { text: "Re-run (bypass cache)" });
+    const invalidateBtn = toolbar.createEl("button", { text: "Invalidate cache" });
+    const renderContainer = resultContent.createDiv({ cls: "analysis-result-rendered" });
+    import_obsidian2.MarkdownRenderer.render(
+      this.app,
+      this.result.content,
+      renderContainer,
+      ((_a2 = this.view.file) == null ? void 0 : _a2.path) || "",
+      this.plugin
+    );
+    const rawContainer = resultContent.createEl("pre", { cls: "analysis-result-raw is-hidden" });
+    rawContainer.createEl("code", { text: this.result.content });
+    toggleBtn.addEventListener("click", () => {
+      const showingRaw = !rawContainer.classList.contains("is-hidden");
+      if (showingRaw) {
+        rawContainer.classList.add("is-hidden");
+        renderContainer.removeClass("is-hidden");
+        toggleBtn.setText("Show raw");
+      } else {
+        renderContainer.addClass("is-hidden");
+        rawContainer.classList.remove("is-hidden");
+        toggleBtn.setText("Show rendered");
+      }
+    });
+    rerunBtn.addEventListener("click", async () => {
+      await this.plugin.executeVisionAction(this.result.action, this.result.imageInfo, this.editor, this.view, this.result.customPrompt);
+      this.close();
+    });
+    invalidateBtn.addEventListener("click", () => {
+      this.plugin.cacheManager.invalidate(this.result.imageInfo, this.result.action, this.result.noteContext, this.result.customPrompt);
+      new import_obsidian2.Notice("Cache entry invalidated");
     });
     const buttonContainer = contentEl.createDiv("button-container");
     const primaryRow = buttonContainer.createDiv("button-row");
     new import_obsidian2.Setting(primaryRow).addButton((btn) => btn.setButtonText("Insert at Cursor").setCta().onClick(() => this.insertResult("cursor"))).addButton((btn) => btn.setButtonText("Copy to Clipboard").onClick(() => this.copyToClipboard()));
     const secondaryRow = buttonContainer.createDiv("button-row");
-    new import_obsidian2.Setting(secondaryRow).addButton((btn) => btn.setButtonText("Insert as Quote").onClick(() => this.insertResult("quote"))).addButton((btn) => btn.setButtonText("Insert as Callout").onClick(() => this.insertResult("callout"))).addButton((btn) => btn.setButtonText("Save to New Note").onClick(() => this.insertResult("new-note")));
+    new import_obsidian2.Setting(secondaryRow).addButton((btn) => btn.setButtonText("Insert as Quote").onClick(() => this.insertResult("quote"))).addButton((btn) => btn.setButtonText("Insert as Callout").onClick(() => this.insertResult("callout"))).addButton((btn) => btn.setButtonText("Save to New Note").onClick(() => this.insertResult("new-note"))).addButton((btn) => btn.setButtonText("Insert Above Image").onClick(() => this.insertResult("above-image"))).addButton((btn) => btn.setButtonText("Insert Below Image").onClick(() => this.insertResult("below-image"))).addButton((btn) => btn.setButtonText("Replace Image with Callout").onClick(() => this.insertResult("replace-image-callout")));
   }
   getActionTitle(action) {
     const titles = {
@@ -6843,7 +7107,11 @@ var ResultsModal = class extends import_obsidian2.Modal {
       "generate-description": "Description",
       "identify-text": "Text Content",
       "analyze-structure": "Structure Analysis",
-      "quick-insights": "Quick Insights"
+      "quick-insights": "Quick Insights",
+      "analyze-data-viz": "Data Visualization Analysis",
+      "extract-meeting-participants": "Meeting Participants",
+      "analyze-meeting-content": "Meeting Content Analysis",
+      "custom-vision": "Custom Vision"
     };
     return titles[action] || action;
   }
@@ -6870,6 +7138,15 @@ var ResultsModal = class extends import_obsidian2.Modal {
         case "daily-note":
           await this.appendToDailyNote();
           break;
+        case "above-image":
+          this.insertRelativeToImage("above");
+          break;
+        case "below-image":
+          this.insertRelativeToImage("below");
+          break;
+        case "replace-image-callout":
+          this.replaceImageWithCallout();
+          break;
       }
       new import_obsidian2.Notice(`Inserted ${this.getActionTitle(this.result.action)} result`);
       this.close();
@@ -6890,6 +7167,34 @@ var ResultsModal = class extends import_obsidian2.Modal {
       "quick-insights": "example"
     };
     return calloutTypes[action] || "info";
+  }
+  insertRelativeToImage(position) {
+    var _a2;
+    if (!((_a2 = this.result.noteContext) == null ? void 0 : _a2.matchIndex) || this.result.noteContext.matchLength == null) {
+      this.editor.replaceSelection(this.formatContent(this.result.content, "cursor"));
+      return;
+    }
+    const content = this.formatContent(this.result.content, "cursor");
+    const doc = this.editor.getValue();
+    const insertAt = position === "above" ? this.result.noteContext.matchIndex : this.result.noteContext.matchIndex + this.result.noteContext.matchLength;
+    const before = doc.slice(0, insertAt) + "\n\n" + content + "\n\n";
+    const after = doc.slice(insertAt);
+    this.editor.setValue(before + after);
+  }
+  replaceImageWithCallout() {
+    var _a2;
+    if (!((_a2 = this.result.noteContext) == null ? void 0 : _a2.matchIndex) || this.result.noteContext.matchLength == null) {
+      this.editor.replaceSelection(this.formatContent(this.result.content, "callout"));
+      return;
+    }
+    const calloutType = this.getCalloutType(this.result.action);
+    const content = `> [!${calloutType}] ${this.getActionTitle(this.result.action)}
+> ${this.formatContent(this.result.content, "callout").replace(/\n/g, "\n> ")}`;
+    const doc = this.editor.getValue();
+    const start = this.result.noteContext.matchIndex;
+    const end = start + this.result.noteContext.matchLength;
+    const updated = doc.slice(0, start) + content + "\n" + doc.slice(end);
+    this.editor.setValue(updated);
   }
   async copyToClipboard() {
     await navigator.clipboard.writeText(this.result.content);
@@ -6926,6 +7231,7 @@ var VisionInsightsSettingTab = class extends import_obsidian3.PluginSettingTab {
     this.plugin = plugin;
   }
   display() {
+    var _a2, _b;
     const { containerEl } = this;
     containerEl.empty();
     console.log("Vision Insights: Displaying settings tab.");
@@ -6956,6 +7262,28 @@ var VisionInsightsSettingTab = class extends import_obsidian3.PluginSettingTab {
         this.plugin.settings.preferredModel = value;
         await this.plugin.saveSettings();
       }));
+      containerEl.createEl("h3", { text: "Output Formatting" });
+      new import_obsidian3.Setting(containerEl).setName("Output Language").setDesc('Language for generated content. "auto" lets the model decide based on context.').addDropdown((drop) => {
+        var _a3;
+        return drop.addOption("auto", "Auto").addOption("en", "English").addOption("de", "German").addOption("fr", "French").addOption("es", "Spanish").setValue((_a3 = this.plugin.settings.outputLanguage) != null ? _a3 : "auto").onChange(async (value) => {
+          this.plugin.settings.outputLanguage = value;
+          await this.plugin.saveSettings();
+        });
+      });
+      new import_obsidian3.Setting(containerEl).setName("Max Output Tokens").setDesc("Upper bound for tokens in a single response (content + reasoning). Larger values may increase cost.").addText((text) => {
+        var _a3;
+        return text.setPlaceholder("1500").setValue(String((_a3 = this.plugin.settings.maxOutputTokens) != null ? _a3 : 1500)).onChange(async (value) => {
+          const n = parseInt(value, 10);
+          if (!isNaN(n) && n > 0) {
+            this.plugin.settings.maxOutputTokens = n;
+            await this.plugin.saveSettings();
+          }
+        });
+      });
+      new import_obsidian3.Setting(containerEl).setName("Include Image Link on Insert").setDesc("Append a source link to the image when inserting results into notes").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.includeImageLink).onChange(async (value) => {
+        this.plugin.settings.includeImageLink = value;
+        await this.plugin.saveSettings();
+      }));
       containerEl.createEl("h3", { text: "Enabled Actions" });
       containerEl.createEl("p", {
         text: "Choose which analysis actions to show in the context menu:",
@@ -6970,7 +7298,8 @@ var VisionInsightsSettingTab = class extends import_obsidian3.PluginSettingTab {
         { action: "quick-insights", title: "Quick Insights", desc: "Provide notable observations and insights" },
         { action: "analyze-data-viz", title: "Analyze Data Visualization", desc: "Specialized analysis for charts, graphs, and data visualizations" },
         { action: "extract-meeting-participants", title: "Extract Meeting Participants", desc: "Extract list of participants from meeting screenshots" },
-        { action: "analyze-meeting-content", title: "Analyze Meeting Content", desc: "Analyze meeting screens including presentations, shared content, and participant information" }
+        { action: "analyze-meeting-content", title: "Analyze Meeting Content", desc: "Analyze meeting screens including presentations, shared content, and participant information" },
+        { action: "custom-vision", title: "Custom Vision Prompt", desc: "Enter a custom instruction and analyze the selected image; output is forced to Obsidian Markdown" }
       ];
       for (const config of actionConfigs) {
         new import_obsidian3.Setting(containerEl).setName(config.title).setDesc(config.desc).addToggle((toggle) => toggle.setValue(this.plugin.settings.enabledActions.includes(config.action)).onChange(async (value) => {
@@ -7008,6 +7337,80 @@ var VisionInsightsSettingTab = class extends import_obsidian3.PluginSettingTab {
           new import_obsidian3.Notice("Cache cleared");
           this.display();
         }));
+        new import_obsidian3.Setting(containerEl).setName("Max Cache Entries").setDesc("Limit the number of cached results (LRU eviction). 0 disables the limit.").addText((text) => {
+          var _a3;
+          return text.setPlaceholder("200").setValue(String((_a3 = this.plugin.settings.maxCacheEntries) != null ? _a3 : 200)).onChange(async (value) => {
+            const n = parseInt(value, 10);
+            if (!isNaN(n) && n >= 0) {
+              this.plugin.settings.maxCacheEntries = n;
+              await this.plugin.saveSettings();
+            }
+          });
+        });
+      }
+      containerEl.createEl("h3", { text: "Image Processing" });
+      new import_obsidian3.Setting(containerEl).setName("Downscale Vault Images").setDesc("Downscale large images before upload to reduce cost and latency").addToggle((toggle) => toggle.setValue(!!this.plugin.settings.downscaleImages).onChange(async (value) => {
+        this.plugin.settings.downscaleImages = value;
+        await this.plugin.saveSettings();
+        this.display();
+      }));
+      if (this.plugin.settings.downscaleImages) {
+        new import_obsidian3.Setting(containerEl).setName("Max Image Dimension (px)").setDesc("Largest width/height after downscaling").addSlider((slider) => {
+          var _a3;
+          return slider.setLimits(800, 3e3, 50).setValue((_a3 = this.plugin.settings.maxImageDimension) != null ? _a3 : 1600).setDynamicTooltip().onChange(async (value) => {
+            this.plugin.settings.maxImageDimension = value;
+            await this.plugin.saveSettings();
+          });
+        });
+      }
+      containerEl.createEl("h3", { text: "Per-Action Overrides" });
+      const perActionContainer = containerEl.createDiv();
+      const actions = [
+        "smart-summary",
+        "extract-facts",
+        "generate-description",
+        "identify-text",
+        "analyze-structure",
+        "quick-insights",
+        "analyze-data-viz",
+        "extract-meeting-participants",
+        "analyze-meeting-content",
+        "custom-vision"
+      ];
+      for (const action of actions) {
+        const section = perActionContainer.createDiv({ cls: "vi-action-section" });
+        section.createEl("h4", { text: action.replace(/-/g, " ") });
+        const cfg = (_b = ((_a2 = this.plugin.settings.perActionConfig) != null ? _a2 : this.plugin.settings.perActionConfig = {})[action]) != null ? _b : this.plugin.settings.perActionConfig[action] = {};
+        new import_obsidian3.Setting(section).setName("Model Override").setDesc("Use a specific model for this action").addDropdown((drop) => {
+          var _a3;
+          return drop.addOption("", "Default").addOption("gpt-4.1-mini", "GPT-4.1 Mini").addOption("gpt-4o-mini", "GPT-4o Mini").addOption("gpt-4o", "GPT-4o").setValue((_a3 = cfg.model) != null ? _a3 : "").onChange(async (value) => {
+            cfg.model = value || void 0;
+            this.plugin.settings.perActionConfig[action] = cfg;
+            await this.plugin.saveSettings();
+          });
+        });
+        new import_obsidian3.Setting(section).setName("Temperature Override").setDesc("Randomness of output (0\u20131); lower is more factual").addText((text) => text.setPlaceholder("Default").setValue(cfg.temperature != null ? String(cfg.temperature) : "").onChange(async (value) => {
+          const n = parseFloat(value);
+          cfg.temperature = isNaN(n) ? void 0 : n;
+          this.plugin.settings.perActionConfig[action] = cfg;
+          await this.plugin.saveSettings();
+        }));
+        new import_obsidian3.Setting(section).setName("Image Detail").setDesc("Level of detail to request from the vision model").addDropdown((drop) => {
+          var _a3;
+          return drop.addOption("", "Default (auto)").addOption("low", "Low").addOption("auto", "Auto").addOption("high", "High").setValue((_a3 = cfg.imageDetail) != null ? _a3 : "").onChange(async (value) => {
+            cfg.imageDetail = value || void 0;
+            this.plugin.settings.perActionConfig[action] = cfg;
+            await this.plugin.saveSettings();
+          });
+        });
+        new import_obsidian3.Setting(section).setName("Default Insertion Mode").setDesc("Preferred insertion mode for this action").addDropdown((drop) => {
+          var _a3;
+          return drop.addOption("", "Default").addOption("cursor", "At Cursor Position").addOption("quote", "As Blockquote").addOption("callout", "As Callout").addOption("new-note", "Create New Note").addOption("daily-note", "Append to Daily Note").addOption("above-image", "Insert Above Image").addOption("below-image", "Insert Below Image").addOption("replace-image-callout", "Replace Image with Callout").setValue((_a3 = cfg.defaultInsertionMode) != null ? _a3 : "").onChange(async (value) => {
+            cfg.defaultInsertionMode = value || void 0;
+            this.plugin.settings.perActionConfig[action] = cfg;
+            await this.plugin.saveSettings();
+          });
+        });
       }
       new import_obsidian3.Setting(containerEl).setName("Rate Limit Delay (ms)").setDesc("Minimum delay between API requests to avoid rate limiting").addSlider((slider) => slider.setLimits(100, 2e3, 100).setValue(this.plugin.settings.rateLimitDelay).setDynamicTooltip().onChange(async (value) => {
         this.plugin.settings.rateLimitDelay = value;
@@ -7032,13 +7435,14 @@ var CacheManager = class {
   constructor(plugin) {
     this.plugin = plugin;
     this.cache = /* @__PURE__ */ new Map();
+    this.accessOrder = [];
     this.loadCache();
   }
-  getCachedResult(imageInfo, action, noteContext) {
+  getCachedResult(imageInfo, action, noteContext, customPrompt) {
     if (!this.plugin.settings.cacheResults) {
       return null;
     }
-    const cacheKey = this.generateCacheKey(imageInfo, action, noteContext);
+    const cacheKey = this.generateCacheKey(imageInfo, action, noteContext, customPrompt);
     const entry = this.cache.get(cacheKey);
     if (!entry) {
       return null;
@@ -7051,11 +7455,11 @@ var CacheManager = class {
     }
     return entry.result;
   }
-  cacheResult(imageInfo, action, result, noteContext) {
+  cacheResult(imageInfo, action, result, noteContext, customPrompt) {
     if (!this.plugin.settings.cacheResults) {
       return;
     }
-    const cacheKey = this.generateCacheKey(imageInfo, action, noteContext);
+    const cacheKey = this.generateCacheKey(imageInfo, action, noteContext, customPrompt);
     const entry = {
       result,
       timestamp: Date.now(),
@@ -7063,16 +7467,43 @@ var CacheManager = class {
       imageHash: this.hashImageInfo(imageInfo)
     };
     this.cache.set(cacheKey, entry);
+    this.touchKey(cacheKey);
+    this.enforceLimits();
     this.saveCache();
   }
-  generateCacheKey(imageInfo, action, noteContext) {
+  generateCacheKey(imageInfo, action, noteContext, customPrompt) {
     const imageHash = this.hashImageInfo(imageInfo);
     let key = `${imageHash}-${action}`;
     if (noteContext) {
       const contextHash = this.hashNoteContext(noteContext);
       key += `-${contextHash}`;
     }
+    if (customPrompt && action === "custom-vision") {
+      key += `-${hashString(customPrompt.substring(0, 500))}`;
+    }
     return key;
+  }
+  invalidate(imageInfo, action, noteContext, customPrompt) {
+    const key = this.generateCacheKey(imageInfo, action, noteContext, customPrompt);
+    if (this.cache.delete(key)) {
+      this.accessOrder = this.accessOrder.filter((k) => k !== key);
+      this.saveCache();
+    }
+  }
+  touchKey(key) {
+    this.accessOrder = this.accessOrder.filter((k) => k !== key);
+    this.accessOrder.push(key);
+  }
+  enforceLimits() {
+    const maxEntries = this.plugin.settings.maxCacheEntries;
+    if (!maxEntries || maxEntries <= 0)
+      return;
+    while (this.cache.size > maxEntries) {
+      const oldest = this.accessOrder.shift();
+      if (!oldest)
+        break;
+      this.cache.delete(oldest);
+    }
   }
   hashImageInfo(imageInfo) {
     const hashInput = `${imageInfo.path}-${imageInfo.filename}-${imageInfo.mimeType}`;
@@ -7105,6 +7536,7 @@ var CacheManager = class {
       const data = await this.plugin.loadData();
       if (data == null ? void 0 : data.cache) {
         this.cache = new Map(Object.entries(data.cache));
+        this.accessOrder = Array.from(this.cache.entries()).sort((a, b) => a[1].timestamp - b[1].timestamp).map(([key]) => key);
       }
     } catch (error) {
       console.error("Error loading cache:", error);
@@ -7121,6 +7553,61 @@ var CacheManager = class {
   }
 };
 
+// src/prompt-modal.ts
+var import_obsidian4 = require("obsidian");
+var PromptModal = class extends import_obsidian4.Modal {
+  constructor(app, titleText, onSubmit) {
+    super(app);
+    this.value = "";
+    this.titleText = titleText;
+    this.onSubmit = onSubmit;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.createEl("h2", { text: this.titleText });
+    const desc = contentEl.createEl("p", {
+      text: "Output will be formatted as Obsidian Markdown automatically."
+    });
+    desc.style.marginBottom = "8px";
+    new import_obsidian4.Setting(contentEl).setName("Custom prompt").setDesc("Describe what you want extracted, analyzed, or generated based on the selected image").addTextArea((text) => {
+      text.setPlaceholder("e.g., Compare trends, list risks, draft action items, generate tags...");
+      text.inputEl.style.width = "100%";
+      text.inputEl.style.height = "120px";
+      text.onChange((value) => this.value = value);
+    });
+    const buttons = contentEl.createDiv({ cls: "modal-button-row" });
+    const submitBtn = buttons.createEl("button", { text: "Run" });
+    submitBtn.addEventListener("click", () => {
+      this.close();
+      this.onSubmit(this.value.trim() ? this.value.trim() : null);
+    });
+    const cancelBtn = buttons.createEl("button", { text: "Cancel" });
+    cancelBtn.addEventListener("click", () => {
+      this.close();
+      this.onSubmit(null);
+    });
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+};
+
+// src/action-config.ts
+var ACTIONS = {
+  "smart-summary": { title: "Smart Summary", icon: "file-text", callout: "summary", defaultInsertionMode: "callout" },
+  "extract-facts": { title: "Key Facts", icon: "list", callout: "info", defaultInsertionMode: "cursor" },
+  "generate-description": { title: "Description", icon: "image", callout: "note", defaultInsertionMode: "cursor" },
+  "identify-text": { title: "Text Content", icon: "type", callout: "quote", defaultInsertionMode: "cursor" },
+  "analyze-structure": { title: "Structure Analysis", icon: "network", callout: "tip", defaultInsertionMode: "callout" },
+  "quick-insights": { title: "Quick Insights", icon: "lightbulb", callout: "example", defaultInsertionMode: "cursor" },
+  "analyze-data-viz": { title: "Data Visualization Analysis", icon: "bar-chart", callout: "info", defaultInsertionMode: "callout" },
+  "extract-meeting-participants": { title: "Meeting Participants", icon: "users", callout: "info", defaultInsertionMode: "cursor" },
+  "analyze-meeting-content": { title: "Meeting Content Analysis", icon: "video", callout: "note", defaultInsertionMode: "callout" },
+  "custom-vision": { title: "Custom Vision", icon: "pencil", callout: "note", defaultInsertionMode: "cursor" }
+};
+
 // main.ts
 var DEFAULT_SETTINGS = {
   openaiApiKey: "",
@@ -7134,14 +7621,15 @@ var DEFAULT_SETTINGS = {
     "quick-insights",
     "analyze-data-viz",
     "extract-meeting-participants",
-    "analyze-meeting-content"
+    "analyze-meeting-content",
+    "custom-vision"
   ],
   defaultInsertionMode: "cursor",
   cacheResults: true,
   maxCacheAge: 24,
   rateLimitDelay: 500
 };
-var VisionInsightsPlugin = class extends import_obsidian4.Plugin {
+var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
     this.lastRequestTime = 0;
@@ -7161,8 +7649,22 @@ var VisionInsightsPlugin = class extends import_obsidian4.Plugin {
       this.addCommand({
         id: "test-vision-analysis",
         name: "Test Vision Analysis",
-        callback: () => new import_obsidian4.Notice("Vision Insights plugin loaded successfully!")
+        callback: () => new import_obsidian5.Notice("Vision Insights plugin loaded successfully!")
       });
+      this.addCommand({
+        id: "analyze-all-images-in-note",
+        name: "Vision: Analyze All Images in Current Note\u2026",
+        checkCallback: (checking) => {
+          const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+          if (!view)
+            return false;
+          if (!checking) {
+            this.analyzeAllImagesInNote(view);
+          }
+          return true;
+        }
+      });
+      this.addCommandPaletteCommands();
       console.log("Vision Insights: Plugin loaded successfully.");
     } catch (error) {
       console.error("Vision Insights: Fatal error during onload:", error);
@@ -7194,10 +7696,10 @@ var VisionInsightsPlugin = class extends import_obsidian4.Plugin {
       this.app.workspace.on(
         "file-menu",
         (menu, file) => {
-          if (file instanceof import_obsidian4.TFile && file.extension.match(/^(png|jpg|jpeg|gif|webp|bmp|tiff)$/i)) {
+          if (file instanceof import_obsidian5.TFile && file.extension.match(/^(png|jpg|jpeg|gif|webp|bmp|tiff)$/i)) {
             const imageInfo = this.imageHandler.createImageInfoFromFile(file);
             if (imageInfo) {
-              const activeView = this.app.workspace.getActiveViewOfType(import_obsidian4.MarkdownView);
+              const activeView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
               if (activeView) {
                 this.addVisionMenuItems(menu, imageInfo, activeView.editor, activeView);
               }
@@ -7206,6 +7708,22 @@ var VisionInsightsPlugin = class extends import_obsidian4.Plugin {
         }
       )
     );
+  }
+  addCommandPaletteCommands() {
+    this.addCommand({
+      id: "vision-custom-prompt",
+      name: "Vision: Custom Prompt for Image\u2026",
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+        if (!view)
+          return false;
+        if (!checking) {
+          const editor = view.editor;
+          this.handleEditorMenu(new import_obsidian5.Menu(), editor, view);
+        }
+        return true;
+      }
+    });
   }
   async handleEditorMenu(menu, editor, view) {
     const imageInfo = await this.imageHandler.detectImageAtCursor(editor, view);
@@ -7217,48 +7735,49 @@ var VisionInsightsPlugin = class extends import_obsidian4.Plugin {
     if (!this.settings.enabledActions.length)
       return;
     menu.addSeparator();
-    const actionConfigs = [
-      { action: "smart-summary", title: "\u{1F4DD} Smart Summary", icon: "file-text" },
-      { action: "extract-facts", title: "\u{1F4CA} Extract Key Facts", icon: "list" },
-      { action: "generate-description", title: "\u{1F5BC}\uFE0F Generate Description", icon: "image" },
-      { action: "identify-text", title: "\u{1F524} Identify Text (OCR)", icon: "type" },
-      { action: "analyze-structure", title: "\u{1F3D7}\uFE0F Analyze Structure", icon: "network" },
-      { action: "quick-insights", title: "\u{1F4A1} Quick Insights", icon: "lightbulb" },
-      { action: "analyze-data-viz", title: "\u{1F4C8} Analyze Data Visualization", icon: "bar-chart" },
-      { action: "extract-meeting-participants", title: "\u{1F465} Extract Meeting Participants", icon: "users" },
-      { action: "analyze-meeting-content", title: "\u{1F3A5} Analyze Meeting Content", icon: "video" }
-    ];
+    const actionConfigs = Object.keys(ACTIONS).map((action) => ({
+      action,
+      title: `${ACTIONS[action].title}`,
+      icon: ACTIONS[action].icon
+    }));
     for (const config of actionConfigs) {
       if (this.settings.enabledActions.includes(config.action)) {
         menu.addItem((item) => {
-          item.setTitle(config.title).setIcon(config.icon).onClick(
-            () => this.executeVisionAction(
-              config.action,
-              imageInfo,
-              editor,
-              view
-            )
-          );
+          item.setTitle(config.title).setIcon(config.icon).onClick(async () => {
+            if (config.action === "custom-vision") {
+              const prompt = await new Promise((resolve) => {
+                const modal = new PromptModal(this.app, "Enter custom prompt for vision analysis", (value) => resolve(value));
+                modal.open();
+              });
+              if (!prompt)
+                return;
+              await this.executeVisionAction(config.action, imageInfo, editor, view, prompt);
+            } else {
+              await this.executeVisionAction(config.action, imageInfo, editor, view);
+            }
+          });
         });
       }
     }
     menu.addSeparator();
   }
-  async executeVisionAction(action, imageInfo, editor, view) {
+  async executeVisionAction(action, imageInfo, editor, view, customPrompt) {
     try {
       await this.enforceRateLimit();
-      new import_obsidian4.Notice(`Analyzing image with ${action.replace(/-/g, " ")}...`);
+      new import_obsidian5.Notice(`Analyzing image with ${action.replace(/-/g, " ")}...`);
       const noteContext = this.imageHandler.extractNoteContext(editor, view, imageInfo);
-      const cachedResult = this.cacheManager.getCachedResult(imageInfo, action, noteContext);
+      const cachedResult = this.cacheManager.getCachedResult(imageInfo, action, noteContext, customPrompt);
       if (cachedResult) {
-        new import_obsidian4.Notice("Showing cached result.");
+        new import_obsidian5.Notice("Showing cached result.");
         this.showResults(
           {
             action,
             content: cachedResult,
             imageInfo,
             timestamp: Date.now(),
-            cached: true
+            cached: true,
+            noteContext,
+            customPrompt
           },
           editor,
           view
@@ -7266,22 +7785,26 @@ var VisionInsightsPlugin = class extends import_obsidian4.Plugin {
         return;
       }
       const imageData = await this.imageHandler.prepareImageForAPI(imageInfo);
-      const result = await this.openaiClient.analyzeImage(imageData, action, noteContext);
-      this.cacheManager.cacheResult(imageInfo, action, result, noteContext);
+      const result = await this.openaiClient.analyzeImage(imageData, action, noteContext, customPrompt);
+      this.cacheManager.cacheResult(imageInfo, action, result.content, noteContext, customPrompt);
       this.showResults(
         {
           action,
-          content: result,
+          content: result.content,
           imageInfo,
           timestamp: Date.now(),
-          cached: false
+          cached: false,
+          noteContext,
+          customPrompt,
+          modelUsed: result.modelUsed,
+          tokens: result.tokens
         },
         editor,
         view
       );
     } catch (error) {
       console.error("Vision analysis error:", error);
-      new import_obsidian4.Notice(`Error analyzing image: ${error.message}`);
+      new import_obsidian5.Notice(`Error analyzing image: ${error.message}`);
     }
   }
   async enforceRateLimit() {
@@ -7295,5 +7818,60 @@ var VisionInsightsPlugin = class extends import_obsidian4.Plugin {
   }
   showResults(result, editor, view) {
     this.resultsModal.show(result, editor, view);
+  }
+  async analyzeAllImagesInNote(view) {
+    var _a2;
+    try {
+      const editor = view.editor;
+      const images = this.imageHandler.extractAllImagesInNote(editor, view);
+      if (!images.length) {
+        new import_obsidian5.Notice("No images found in this note.");
+        return;
+      }
+      const customPrompt = await new Promise((resolve) => {
+        const modal = new PromptModal(this.app, "Enter custom prompt for bulk vision analysis (applies to all images)", (value) => resolve(value));
+        modal.open();
+      });
+      const usingCustom = !!(customPrompt && customPrompt.trim());
+      const overallAction = usingCustom ? "custom-vision" : "extract-facts";
+      new import_obsidian5.Notice(`Analyzing ${images.length} image(s)${usingCustom ? " with custom instructions" : " for key information"}\u2026`);
+      const analyses = [];
+      let lastModel;
+      let lastTokens;
+      for (const { imageInfo, noteContext } of images) {
+        await this.enforceRateLimit();
+        const imageData = await this.imageHandler.prepareImageForAPI(imageInfo);
+        const cached = this.cacheManager.getCachedResult(imageInfo, overallAction, noteContext, customPrompt || void 0);
+        let content;
+        if (cached) {
+          content = cached;
+        } else {
+          const res = await this.openaiClient.analyzeImage(imageData, overallAction, noteContext, customPrompt || void 0);
+          content = res.content;
+          lastModel = res.modelUsed;
+          lastTokens = res.tokens;
+          this.cacheManager.cacheResult(imageInfo, overallAction, content, noteContext, customPrompt || void 0);
+        }
+        analyses.push({ filename: imageInfo.filename, content });
+      }
+      new import_obsidian5.Notice("Consolidating results\u2026");
+      const firstContext = (_a2 = images[0]) == null ? void 0 : _a2.noteContext;
+      const consolidated = await this.openaiClient.consolidateAnalyses(analyses, overallAction, firstContext, customPrompt || void 0);
+      const result = {
+        action: overallAction,
+        content: consolidated.content,
+        imageInfo: images[0].imageInfo,
+        timestamp: Date.now(),
+        cached: false,
+        noteContext: firstContext,
+        customPrompt: customPrompt || void 0,
+        modelUsed: consolidated.modelUsed || lastModel,
+        tokens: consolidated.tokens || lastTokens
+      };
+      this.showResults(result, view.editor, view);
+    } catch (e) {
+      console.error(e);
+      new import_obsidian5.Notice(`Error: ${e.message}`);
+    }
   }
 };

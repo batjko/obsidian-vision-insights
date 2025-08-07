@@ -54,19 +54,39 @@ export class ImageHandler {
       const textBefore = allText.substring(0, matchIndex).trim();
       const textAfter = allText.substring(matchIndex + matchLength).trim();
       
+      const relatedLinks = this.extractRelatedWikiLinks(allText, matchIndex, matchLength, view);
+      const sectionData = this.extractSectionData(allText, matchIndex, view);
+      const meta = this.extractNoteMetadata(view);
       return {
         textBefore,
         textAfter,
-        noteName
+        noteName,
+        matchIndex,
+        matchLength,
+        relatedLinks,
+        sectionTitle: sectionData.sectionTitle,
+        sectionPath: sectionData.sectionPath,
+        sectionText: sectionData.sectionText,
+        tags: meta.tags,
+        frontmatter: meta.frontmatter
       };
     }
 
     // Fallback: if we can't find the specific image, return empty context
     console.warn('Vision Insights: Could not locate image in note content for context extraction');
+    const relatedLinks = this.extractRelatedWikiLinks(allText, 0, 0, view);
+    const sectionData = this.extractSectionData(allText, 0, view);
+    const meta = this.extractNoteMetadata(view);
     return {
       textBefore: '',
       textAfter: '',
-      noteName
+      noteName,
+      relatedLinks,
+      sectionTitle: sectionData.sectionTitle,
+      sectionPath: sectionData.sectionPath,
+      sectionText: sectionData.sectionText,
+      tags: meta.tags,
+      frontmatter: meta.frontmatter
     };
   }
 
@@ -134,7 +154,7 @@ export class ImageHandler {
     return null;
   }
 
-  private createImageInfo(imagePath: string, view: MarkdownView): ImageInfo | null {
+  createImageInfo(imagePath: string, view: MarkdownView): ImageInfo | null {
     const isExternal = imagePath.startsWith('http://') || imagePath.startsWith('https://');
 
     if (isExternal) {
@@ -179,6 +199,165 @@ export class ImageHandler {
 
     const arrayBuffer = await this.app.vault.readBinary(file);
     const base64 = arrayBufferToBase64(arrayBuffer);
-    return `data:${imageInfo.mimeType};base64,${base64}`;
+    let dataUrl = `data:${imageInfo.mimeType};base64,${base64}`;
+
+    if (this.settings.downscaleImages && this.settings.maxImageDimension && imageInfo.mimeType.startsWith('image/')) {
+      try {
+        dataUrl = await this.downscaleDataUrl(dataUrl, this.settings.maxImageDimension);
+      } catch (e) {
+        console.warn('Vision Insights: Downscale failed, using original image.', e);
+      }
+    }
+    return dataUrl;
+  }
+
+  private async downscaleDataUrl(dataUrl: string, maxDim: number): Promise<string> {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload = () => {
+        const largest = Math.max(img.width, img.height);
+        const scale = Math.min(1, maxDim / largest);
+        if (scale >= 1) return resolve(dataUrl);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(dataUrl);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.9));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  }
+
+  extractAllImagesInNote(editor: Editor, view: MarkdownView): Array<{ imageInfo: ImageInfo; noteContext: NoteContext }> {
+    const results: Array<{ imageInfo: ImageInfo; noteContext: NoteContext }> = [];
+    const content = editor.getValue();
+    const noteName = view.file?.basename || 'Untitled';
+
+    const imageRegex = /(!\[\[([^\]]+?)\]\])|(!\[[^\]]*?\]\((.*?)\))|(<img[^>]+src=["'](.*?)["'][^>]*>)/g;
+    let match: RegExpExecArray | null;
+    while ((match = imageRegex.exec(content)) !== null) {
+      const imagePath = match[2] || match[4] || match[6];
+      if (!imagePath) continue;
+      const info = this.createImageInfo(decodeURIComponent(imagePath), view);
+      if (!info) continue;
+
+      const matchIndex = match.index;
+      const matchLength = match[0].length;
+      const textBefore = content.substring(0, matchIndex).trim();
+      const textAfter = content.substring(matchIndex + matchLength).trim();
+      const relatedLinks = this.extractRelatedWikiLinks(content, matchIndex, matchLength, view);
+      const sectionData = this.extractSectionData(content, matchIndex, view);
+      const meta = this.extractNoteMetadata(view);
+      const nc: NoteContext = {
+        textBefore,
+        textAfter,
+        noteName,
+        matchIndex,
+        matchLength,
+        relatedLinks,
+        sectionTitle: sectionData.sectionTitle,
+        sectionPath: sectionData.sectionPath,
+        sectionText: sectionData.sectionText,
+        tags: meta.tags,
+        frontmatter: meta.frontmatter
+      };
+      results.push({ imageInfo: info, noteContext: nc });
+    }
+    return results;
+  }
+
+  private extractRelatedWikiLinks(allText: string, matchIndex: number, matchLength: number, view: MarkdownView) {
+    const windowRadius = 800; // characters around the image
+    const start = Math.max(0, matchIndex - windowRadius);
+    const end = Math.min(allText.length, matchIndex + matchLength + windowRadius);
+    const windowText = allText.slice(start, end);
+
+    // Matches [[link]] or [[link|alias]]
+    const linkRegex = /\[\[([^\]|\n]+)(?:\|([^\]]+))?\]\]/g;
+    const results: Array<{ linkText: string; path: string; title: string; excerpt: string }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = linkRegex.exec(windowText)) !== null) {
+      const target = m[1].trim();
+      const alias = (m[2] || '').trim();
+      const sourcePath = view.file?.path || '';
+      const file = this.app.metadataCache.getFirstLinkpathDest(target, sourcePath);
+      if (!file || !(file instanceof TFile)) continue;
+
+      // Extract small excerpt from the target note (first 200 chars excluding frontmatter)
+      // Note: synchronous read is not available; use cached metadata for excerpt if possible
+      const cache = this.app.metadataCache.getFileCache(file);
+      let excerpt = '';
+      if (cache?.sections && cache.sections.length > 0) {
+        // Use the first section position to bound excerpt length if available
+        excerpt = cache?.headings?.[0]?.heading || '';
+      }
+      if (!excerpt) {
+        excerpt = file.basename;
+      }
+
+      results.push({
+        linkText: alias || target,
+        path: file.path,
+        title: file.basename,
+        excerpt: excerpt
+      });
+    }
+    return results;
+  }
+
+  private extractSectionData(allText: string, anchorIndex: number, view: MarkdownView) {
+    // Identify the nearest preceding heading and build the path
+    const headingRegex = /^ {0,3}(#{1,6})\s+(.+)$/gm;
+    const headings: Array<{ level: number; title: string; index: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = headingRegex.exec(allText)) !== null) {
+      headings.push({ level: m[1].length, title: m[2].trim(), index: m.index });
+    }
+    const path: string[] = [];
+    let sectionTitle = '';
+    let sectionStart = 0;
+    let sectionEnd = allText.length;
+    for (let i = 0; i < headings.length; i++) {
+      const h = headings[i];
+      if (h.index <= anchorIndex) {
+        // part of the path
+        while (path.length >= h.level) path.pop();
+        path.push(h.title);
+        sectionTitle = h.title;
+        sectionStart = h.index + m?.[0]?.length || h.index; // approximate start of section text
+        // end is next heading at same or higher level
+        for (let j = i + 1; j < headings.length; j++) {
+          if (headings[j].level <= h.level) {
+            sectionEnd = headings[j].index;
+            break;
+          }
+        }
+      } else {
+        break;
+      }
+    }
+    const sectionText = allText.slice(sectionStart, sectionEnd).trim().slice(0, 1200);
+    return { sectionTitle, sectionPath: path, sectionText };
+  }
+
+  private extractNoteMetadata(view: MarkdownView) {
+    const file = view.file;
+    const cache = file ? this.app.metadataCache.getFileCache(file) : undefined;
+    const frontmatter = (cache as any)?.frontmatter || undefined;
+    const tags: string[] = [];
+    if (cache?.tags) {
+      for (const t of cache.tags) {
+        if (t.tag) tags.push(t.tag.replace(/^#/, ''));
+      }
+    }
+    if (cache?.frontmatter && Array.isArray((cache.frontmatter as any).tags)) {
+      for (const t of (cache.frontmatter as any).tags) {
+        if (typeof t === 'string') tags.push(t.replace(/^#/, ''));
+      }
+    }
+    return { frontmatter, tags };
   }
 } 

@@ -8,7 +8,7 @@ Vision Insights is an Obsidian plugin that brings AI-powered image analysis dire
 
 ## Features
 
-### 🎯 **9 Specialized Analysis Actions**
+### 🎯 **10 Specialized Analysis Actions**
 
 - **📝 Smart Summary** - Focused 2-3 sentence summaries capturing core messages and key takeaways
 - **📊 Extract Key Facts** - Organized bulleted lists of specific data points, metrics, and actionable items
@@ -19,20 +19,22 @@ Vision Insights is an Obsidian plugin that brings AI-powered image analysis dire
 - **📈 Analyze Data Visualization** - Specialized analysis for charts, graphs, and data visualizations
 - **👥 Extract Meeting Participants** - List all visible meeting participants, names, avatars, and roles from screenshots
 - **🗂️ Analyze Meeting Content** - Comprehensive analysis of meeting screenshots, shared content, context, and action items
+- **✍️ Custom Vision Prompt** - Provide your own prompt; output is guaranteed Obsidian Markdown
 
 ### 🚀 **Smart Integration**
 
 - **Context Menu Integration** - Right-click any image for instant analysis
 - **Universal Image Support** - Works with `![[image.png]]`, `![](image.png)`, and `<img>` syntax
 - **External Image Support** - Analyze both vault images and external URLs
-- **Multiple Insertion Modes** - Insert results at cursor, as blockquotes, callouts, new notes, or daily notes
+- **Multiple Insertion Modes** - Insert results at cursor, as blockquotes, callouts, new notes, daily notes, above/below the image, or replacing the image with a callout
 
 ### ⚡ **Performance & Efficiency**
 
-- **Intelligent Caching** - Avoid repeat API calls with configurable cache duration
+- **Intelligent Caching** - Avoid repeat API calls with configurable cache duration and LRU cap
 - **Rate Limiting** - Built-in request throttling to prevent API limits
 - **Model Selection** - Choose between GPT-4.1 Mini, GPT-4o Mini, or GPT-4o
-- **Batch Processing** - Efficient handling of multiple image analyses
+- **Batch Processing** - Analyze all images in the current note and aggregate results
+- **Optional Downscaling** - Reduce large image sizes before upload to save cost/time
 
 ## Installation
 
@@ -108,6 +110,8 @@ npm run build
 - **As Callout** - Create Obsidian callout blocks with analysis results
 - **Create New Note** - Generate a dedicated note for the analysis
 - **Append to Daily Note** - Add to today's daily note
+- **Insert Above/Below Image** - Place content adjacent to the image
+- **Replace Image with Callout** - Swap the image for a formatted callout
 
 ## Configuration Options
 
@@ -130,9 +134,11 @@ Enable/disable specific analysis types:
 
 ### Performance Settings
 
-- **Caching** - Cache results to avoid repeat API calls (configurable duration: 1-168 hours)
+- **Caching** - Cache results to avoid repeat API calls (configurable duration: 1-168 hours) with max entries
 - **Rate Limiting** - Minimum delay between requests (100-2000ms)
 - **Default Insertion Mode** - Choose how results are inserted by default
+- **Downscaling** - Toggle and max dimension for local images
+- **Per-Action Overrides** - Model, temperature, image detail, and insertion mode per action
 
 ## Examples
 

@@ -1,8 +1,14 @@
 /* Vision Insights Plugin Styles */
 
+.vision-insights-modal {
+  width: min(1000px, 90vw);
+}
+
 .vision-insights-modal .modal-content {
   padding: 20px;
-  max-width: 600px;
+  /* Make modal substantially wider while respecting viewport */
+  width: 100%;
+  max-width: none;
 }
 
 .vision-insights-modal .image-info {
@@ -23,18 +29,40 @@
   margin-left: 10px;
 }
 
-.vision-insights-modal .analysis-result {
-  padding: 15px;
-  margin: 15px 0;
-  background-color: var(--background-primary-alt);
-  border-radius: 5px;
-  border-left: 4px solid var(--interactive-accent);
-  white-space: pre-wrap;
-  font-family: var(--font-text);
-  line-height: 1.5;
-  max-height: 300px;
-  overflow-y: auto;
+/* Result content wrapper for rendered/raw views */
+.vision-insights-modal .result-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
+
+.vision-insights-modal .result-toolbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.vision-insights-modal .analysis-result-rendered,
+.vision-insights-modal .analysis-result-raw {
+  padding: 12px;
+  margin: 4px 0 12px 0;
+  background-color: var(--background-primary-alt);
+  border-radius: 6px;
+  border-left: 4px solid var(--interactive-accent);
+  font-family: var(--font-text);
+  line-height: 1.6;
+  max-height: 420px;
+  overflow: auto;
+  white-space: normal;
+  word-wrap: break-word;
+  overflow-wrap: anywhere;
+}
+
+.vision-insights-modal .analysis-result-raw code {
+  white-space: pre-wrap;
+}
+
+.vision-insights-modal .is-hidden { display: none; }
 
 .vision-insights-modal .button-container {
   margin-top: 20px;
@@ -42,7 +70,8 @@
 
 .vision-insights-modal .button-row {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-bottom: 10px;
 }
 
@@ -52,7 +81,14 @@
 }
 
 .vision-insights-modal .button-row .setting-item-control {
-  justify-content: center;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Improve modal heading spacing */
+.vision-insights-modal h2 {
+  margin-top: 0;
 }
 
 /* Settings page styles */

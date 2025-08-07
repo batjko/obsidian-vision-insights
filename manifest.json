@@ -1,7 +1,7 @@
 {
   "id": "vision-insights",
   "name": "Vision Insights",
-  "version": "1.1.2",
+  "version": "1.2.0",
   "minAppVersion": "0.15.0",
   "description": "AI-powered image analysis for your notes with contextual insights",
   "author": "Patrick Metzdorf",

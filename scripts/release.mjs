@@ -53,43 +53,28 @@ async function checkGitStatus() {
   try {
     const status = execCommand('git status --porcelain', true);
     if (status) {
-      // Check if changes are only in version-related files
       const lines = status.split('\n').filter(line => line.trim());
-      const versionFiles = ['package.json', 'manifest.json', 'versions.json'];
-      const nonVersionChanges = lines.filter(line => {
-        const file = line.substring(3); // Remove git status prefix
-        return !versionFiles.includes(file);
-      });
-      
-      if (nonVersionChanges.length > 0) {
-        warning('Working directory has uncommitted changes:');
-        nonVersionChanges.forEach(line => console.log(`  ${line}`));
-        warning('Please commit or stash non-version changes before releasing.');
-        
-        // Ask user if they want to continue
-        const readline = require('readline');
-        const rl = readline.createInterface({
-          input: process.stdin,
-          output: process.stdout
-        });
-        
-        const shouldContinue = await new Promise((resolve) => {
-          rl.question('Continue anyway? (y/N): ', (answer) => {
-            rl.close();
-            resolve(answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes');
-          });
-        });
-        
-        if (!shouldContinue) {
-          error('Release cancelled by user.');
-        }
-      } else if (lines.length > 0) {
-        info('Only version-related files have changes (will be handled automatically)');
-      }
+      warning(`Working directory has ${lines.length} uncommitted change(s).`);
     }
     success('Git status check passed');
   } catch (err) {
     error('Failed to check git status');
+  }
+}
+
+function commitAllPendingChanges() {
+  const status = execCommand('git status --porcelain', true);
+  if (!status) {
+    info('No pending changes to commit before version bump');
+    return;
+  }
+  info('Committing pending changes before version bump...');
+  try {
+    execCommand('git add -A');
+    execCommand('git commit -m "chore: pre-release commit of pending changes"');
+    success('Committed pending changes');
+  } catch (err) {
+    error('Failed to commit pending changes');
   }
 }
 
@@ -315,6 +300,8 @@ async function main(directVersionType) {
   checkGitHubCLI();
   await checkGitStatus();
   checkRemoteSync();
+  // Ensure all work is committed prior to version bump
+  commitAllPendingChanges();
   
   // Version management
   const versionType = directVersionType || await promptForVersionType();
@@ -331,6 +318,7 @@ async function main(directVersionType) {
     execCommand('git add package.json package-lock.json manifest.json versions.json');
     execCommand(`git commit -m "chore: bump version to ${version}"`);
     execCommand(`git tag v${version}`);
+    // Push any pre-release commits and version bump together
     execCommand('git push origin main');
     execCommand('git push origin --tags');
     success('Version changes committed and tagged');

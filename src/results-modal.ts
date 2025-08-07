@@ -1,4 +1,4 @@
-import { App, Modal, Editor, MarkdownView, Setting, Notice } from 'obsidian';
+import { App, Modal, Editor, MarkdownView, Setting, Notice, MarkdownRenderer } from 'obsidian';
 import { AnalysisResult, InsertionMode } from './types';
 import VisionInsightsPlugin from '../main';
 
@@ -20,6 +20,8 @@ export class ResultsModal extends Modal {
 
   onOpen() {
     const { contentEl } = this;
+    // Ensure modal has a specific class for targeted styling
+    this.modalEl.addClass('vision-insights-modal');
     contentEl.empty();
 
     // Title
@@ -39,11 +41,46 @@ export class ResultsModal extends Modal {
       });
     }
 
-    // Results content
+    // Results content with render toggle
     const resultContent = contentEl.createDiv('result-content');
-    resultContent.createEl('div', { 
-      text: this.result.content,
-      cls: 'analysis-result'
+    const toolbar = resultContent.createDiv({ cls: 'result-toolbar' });
+    const toggleBtn = toolbar.createEl('button', { text: 'Show raw' });
+    const rerunBtn = toolbar.createEl('button', { text: 'Re-run (bypass cache)' });
+    const invalidateBtn = toolbar.createEl('button', { text: 'Invalidate cache' });
+
+    const renderContainer = resultContent.createDiv({ cls: 'analysis-result-rendered' });
+    MarkdownRenderer.render(
+      this.app,
+      this.result.content,
+      renderContainer,
+      this.view.file?.path || '',
+      this.plugin
+    );
+
+    const rawContainer = resultContent.createEl('pre', { cls: 'analysis-result-raw is-hidden' });
+    rawContainer.createEl('code', { text: this.result.content });
+
+    toggleBtn.addEventListener('click', () => {
+      const showingRaw = !rawContainer.classList.contains('is-hidden');
+      if (showingRaw) {
+        rawContainer.classList.add('is-hidden');
+        renderContainer.removeClass('is-hidden');
+        toggleBtn.setText('Show raw');
+      } else {
+        renderContainer.addClass('is-hidden');
+        rawContainer.classList.remove('is-hidden');
+        toggleBtn.setText('Show rendered');
+      }
+    });
+
+    rerunBtn.addEventListener('click', async () => {
+      await this.plugin.executeVisionAction(this.result.action as any, this.result.imageInfo as any, this.editor, this.view, this.result.customPrompt);
+      this.close();
+    });
+
+    invalidateBtn.addEventListener('click', () => {
+      this.plugin.cacheManager.invalidate(this.result.imageInfo, this.result.action as any, this.result.noteContext, this.result.customPrompt);
+      new Notice('Cache entry invalidated');
     });
 
     // Action buttons
@@ -73,7 +110,16 @@ export class ResultsModal extends Modal {
         .onClick(() => this.insertResult('callout')))
       .addButton(btn => btn
         .setButtonText('Save to New Note')
-        .onClick(() => this.insertResult('new-note')));
+        .onClick(() => this.insertResult('new-note')))
+      .addButton(btn => btn
+        .setButtonText('Insert Above Image')
+        .onClick(() => this.insertResult('above-image')))
+      .addButton(btn => btn
+        .setButtonText('Insert Below Image')
+        .onClick(() => this.insertResult('below-image')))
+      .addButton(btn => btn
+        .setButtonText('Replace Image with Callout')
+        .onClick(() => this.insertResult('replace-image-callout')));
   }
 
   private getActionTitle(action: string): string {
@@ -83,7 +129,11 @@ export class ResultsModal extends Modal {
       'generate-description': 'Description',
       'identify-text': 'Text Content',
       'analyze-structure': 'Structure Analysis',
-      'quick-insights': 'Quick Insights'
+      'quick-insights': 'Quick Insights',
+      'analyze-data-viz': 'Data Visualization Analysis',
+      'extract-meeting-participants': 'Meeting Participants',
+      'analyze-meeting-content': 'Meeting Content Analysis',
+      'custom-vision': 'Custom Vision'
     };
     return titles[action] || action;
   }
@@ -113,6 +163,18 @@ export class ResultsModal extends Modal {
         case 'daily-note':
           await this.appendToDailyNote();
           break;
+
+        case 'above-image':
+          this.insertRelativeToImage('above');
+          break;
+
+        case 'below-image':
+          this.insertRelativeToImage('below');
+          break;
+
+        case 'replace-image-callout':
+          this.replaceImageWithCallout();
+          break;
       }
       
       new Notice(`Inserted ${this.getActionTitle(this.result.action)} result`);
@@ -137,6 +199,35 @@ export class ResultsModal extends Modal {
       'quick-insights': 'example'
     };
     return calloutTypes[action] || 'info';
+  }
+
+  private insertRelativeToImage(position: 'above' | 'below') {
+    if (!this.result.noteContext?.matchIndex || this.result.noteContext.matchLength == null) {
+      this.editor.replaceSelection(this.formatContent(this.result.content, 'cursor'));
+      return;
+    }
+    const content = this.formatContent(this.result.content, 'cursor');
+    const doc = this.editor.getValue();
+    const insertAt = position === 'above'
+      ? this.result.noteContext.matchIndex
+      : this.result.noteContext.matchIndex + this.result.noteContext.matchLength;
+    const before = doc.slice(0, insertAt) + '\n\n' + content + '\n\n';
+    const after = doc.slice(insertAt);
+    this.editor.setValue(before + after);
+  }
+
+  private replaceImageWithCallout() {
+    if (!this.result.noteContext?.matchIndex || this.result.noteContext.matchLength == null) {
+      this.editor.replaceSelection(this.formatContent(this.result.content, 'callout'));
+      return;
+    }
+    const calloutType = this.getCalloutType(this.result.action);
+    const content = `> [!${calloutType}] ${this.getActionTitle(this.result.action)}\n> ${this.formatContent(this.result.content, 'callout').replace(/\n/g, '\n> ')}`;
+    const doc = this.editor.getValue();
+    const start = this.result.noteContext.matchIndex;
+    const end = start + this.result.noteContext.matchLength;
+    const updated = doc.slice(0, start) + content + '\n' + doc.slice(end);
+    this.editor.setValue(updated);
   }
 
   private async copyToClipboard() {
