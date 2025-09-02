@@ -202,7 +202,7 @@ export class ResultsModal extends Modal {
   }
 
   private insertRelativeToImage(position: 'above' | 'below') {
-    if (!this.result.noteContext?.matchIndex || this.result.noteContext.matchLength == null) {
+    if (this.result.noteContext?.matchIndex == null || this.result.noteContext.matchLength == null) {
       this.editor.replaceSelection(this.formatContent(this.result.content, 'cursor'));
       return;
     }
@@ -217,7 +217,7 @@ export class ResultsModal extends Modal {
   }
 
   private replaceImageWithCallout() {
-    if (!this.result.noteContext?.matchIndex || this.result.noteContext.matchLength == null) {
+    if (this.result.noteContext?.matchIndex == null || this.result.noteContext.matchLength == null) {
       this.editor.replaceSelection(this.formatContent(this.result.content, 'callout'));
       return;
     }
