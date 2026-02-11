@@ -85,6 +85,21 @@ export function buildPrompt(
       noteContext ? 'Connect interpretation to the surrounding note narrative where useful.' : ''
     ].filter(Boolean).join(' ') + contextSection + obsidianFormatting,
 
+    'analyze-diagram': [
+      'Analyze this image as a diagram and identify the most likely diagram type (for example: flowchart, sequence diagram, architecture diagram, component diagram, data-flow diagram, network topology, org chart, BPMN-like process map).',
+      'Keep text brief but salient: prioritize only high-signal information and avoid verbose explanations.',
+      'Produce a high-level explanation focused on what matters most for that specific type: entities/components, relationships/dependencies, direction of flow, hierarchy/reporting lines, phases/steps, interfaces/handoffs, and key decision points.',
+      'Then generate Mermaid that reproduces the diagram as faithfully as practical.',
+      'If the source is too dense or ambiguous for a faithful Mermaid conversion, create a simplified but accurate abstraction and explicitly note what was simplified.',
+      'Output structure (use only level-4 headings, i.e. `####`, never `#`, `##`, or `###`):\n#### Diagram Type\n- One bullet: type + confidence (high/medium/low)\n#### High-level Description\n- 1–2 bullets maximum about purpose and key signal\n#### Key Elements and Relationships\n- 3–6 concise bullets with strongest nodes/actors and links\n#### Mermaid Reconstruction\n- A mermaid code block only (no prose inside the code block)\n',
+      'Keep each bullet short (prefer one line). Do not include extra sections beyond the required five.',
+      'For Mermaid: choose the most appropriate syntax (`flowchart`, `sequenceDiagram`, `classDiagram`, `erDiagram`, `stateDiagram-v2`, `graph TD/LR`). Prefer valid Mermaid over perfect visual fidelity.',
+      'Mermaid compactness rules: prefer vertical layout (`flowchart TD`) unless left-to-right is semantically required; keep labels short (2–5 words), avoid long sentence labels; minimize crossing edges and deeply nested subgraphs.',
+      'Limit size when possible: target roughly 8–14 core nodes; if the source is larger, keep only the highest-signal entities/flows in Mermaid.',
+      'For very complex visuals, output one primary Mermaid diagram only (not multiple), focused on the main flow/path so it fits typical note width.',
+      noteContext ? 'Use surrounding note context to disambiguate labels, actors, or system names when visible.' : ''
+    ].filter(Boolean).join(' ') + contextSection + obsidianFormatting,
+
     'extract-meeting-participants': [
       'Extract and list all identifiable meeting participants from the screenshot.',
       'Include: name (use [[First Last]]), optionally role/title and status (muted/camera/chat/host).',

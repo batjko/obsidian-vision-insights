@@ -3,7 +3,7 @@ import { VisionInsightsSettings, ImageInfo, NoteContext } from './types';
 import { arrayBufferToBase64, getMimeType } from './utils';
 
 export class ImageHandler {
-  constructor(private app: App, private settings: VisionInsightsSettings) {}
+  constructor(private readonly app: App, private settings: VisionInsightsSettings) {}
 
   updateSettings(settings: VisionInsightsSettings) {
     this.settings = settings;
@@ -42,13 +42,12 @@ export class ImageHandler {
     const noteName = view.file?.basename || 'Untitled';
     const allText = editor.getValue();
 
-    // Find the specific image in the note content
-    const imagePattern = this.createImageSearchPattern(imageInfo);
-    const match = allText.match(imagePattern);
-    
-    if (match) {
-      const matchIndex = match.index!;
-      const matchLength = match[0].length;
+    // Find the image occurrence nearest to the current cursor position.
+    // This avoids inserting relative to the first duplicate image in the note.
+    const nearestMatch = this.findNearestImageMatch(editor, view, imageInfo, allText);
+    if (nearestMatch) {
+      const matchIndex = nearestMatch.index;
+      const matchLength = nearestMatch.length;
       
       // Split content around the actual image
       const textBefore = allText.substring(0, matchIndex).trim();
@@ -90,26 +89,41 @@ export class ImageHandler {
     };
   }
 
-  private createImageSearchPattern(imageInfo: ImageInfo): RegExp {
-    // Create a regex pattern to find this specific image in the markdown content
-    // Need to handle different image formats: ![[image.png]], ![](image.png), <img src="image.png">
-    
-    // Escape special regex characters in the image path/URL
-    const escapedPath = imageInfo.url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const escapedImagePath = imageInfo.path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    
-    // Create patterns for different markdown image formats
-    const patterns = [
-      `!\\[\\[${escapedPath}\\]\\]`,                    // ![[image.png]]
-      `!\\[\\[${escapedImagePath}\\]\\]`,               // ![[path/image.png]]
-      `!\\[[^\\]]*?\\]\\(${escapedPath}\\)`,           // ![alt](image.png)
-      `!\\[[^\\]]*?\\]\\(${escapedImagePath}\\)`,      // ![alt](path/image.png)
-      `<img[^>]+src=["']${escapedPath}["'][^>]*>`,      // <img src="image.png">
-      `<img[^>]+src=["']${escapedImagePath}["'][^>]*>`  // <img src="path/image.png">
-    ];
-    
-    // Combine all patterns with OR operator
-    return new RegExp(patterns.join('|'), 'i');
+  private findNearestImageMatch(
+    editor: Editor,
+    view: MarkdownView,
+    imageInfo: ImageInfo,
+    allText: string
+  ): { index: number; length: number } | null {
+    const imageRegex = /(!\[\[([^\]]+?)\]\])|(!\[[^\]]*?\]\((.*?)\))|(<img[^>]+src=["'](.*?)["'][^>]*>)/g;
+    const cursorOffset = editor.posToOffset(editor.getCursor());
+    const matches: Array<{ index: number; length: number }> = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = imageRegex.exec(allText)) !== null) {
+      const rawPath = match[2] || match[4] || match[6];
+      if (!rawPath) continue;
+      const candidateInfo = this.createImageInfo(decodeURIComponent(rawPath), view);
+      if (!candidateInfo) continue;
+
+      const isSameImage = imageInfo.isExternal
+        ? candidateInfo.url === imageInfo.url
+        : candidateInfo.path === imageInfo.path;
+      if (!isSameImage) continue;
+
+      matches.push({ index: match.index, length: match[0].length });
+    }
+
+    if (!matches.length) return null;
+
+    const containing = matches.find(m => cursorOffset >= m.index && cursorOffset <= m.index + m.length);
+    if (containing) return containing;
+
+    return matches.slice(1).reduce((best, current) => {
+      const bestDistance = Math.abs(cursorOffset - best.index);
+      const currentDistance = Math.abs(cursorOffset - current.index);
+      return currentDistance < bestDistance ? current : best;
+    }, matches[0]);
   }
 
   createImageInfoFromFile(file: TFile): ImageInfo | null {

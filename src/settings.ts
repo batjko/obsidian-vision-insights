@@ -126,6 +126,7 @@ export class VisionInsightsSettingTab extends PluginSettingTab {
         { action: 'analyze-structure', title: 'Analyze Structure', desc: 'Describe layout and organizational structure' },
         { action: 'quick-insights', title: 'Quick Insights', desc: 'Provide notable observations and insights' },
         { action: 'analyze-data-viz', title: 'Analyze Data Visualization', desc: 'Specialized analysis for charts, graphs, and data visualizations' },
+        { action: 'analyze-diagram', title: 'Analyze Diagram + Mermaid', desc: 'Detect diagram type, summarize key structure, and generate a Mermaid reconstruction' },
         { action: 'extract-meeting-participants', title: 'Extract Meeting Participants', desc: 'Extract list of participants from meeting screenshots' },
         { action: 'analyze-meeting-content', title: 'Analyze Meeting Content', desc: 'Analyze meeting screens including presentations, shared content, and participant information' },
         { action: 'custom-vision', title: 'Custom Vision Prompt', desc: 'Enter a custom instruction and analyze the selected image; output is forced to Obsidian Markdown' }
@@ -265,6 +266,7 @@ export class VisionInsightsSettingTab extends PluginSettingTab {
         'analyze-structure',
         'quick-insights',
         'analyze-data-viz',
+        'analyze-diagram',
         'extract-meeting-participants',
         'analyze-meeting-content',
         'custom-vision'

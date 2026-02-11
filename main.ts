@@ -19,10 +19,12 @@ const DEFAULT_SETTINGS: VisionInsightsSettings = {
     'analyze-structure',
     'quick-insights',
     'analyze-data-viz',
+    'analyze-diagram',
     'extract-meeting-participants',
     'analyze-meeting-content',
     'custom-vision'
   ],
+  hasMigratedAnalyzeDiagramAction: false,
   defaultInsertionMode: 'below-image',
   cacheResults: true,
   maxCacheAge: 24,
@@ -90,7 +92,10 @@ export default class VisionInsightsPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-    this.migrateLegacyModels();
+    const changed = this.migrateLegacyModels();
+    if (changed) {
+      await this.saveData(this.settings);
+    }
   }
 
   async saveSettings(): Promise<void> {
@@ -104,7 +109,17 @@ export default class VisionInsightsPlugin extends Plugin {
     }
   }
 
-  private migrateLegacyModels(): void {
+  private migrateLegacyModels(): boolean {
+    let changed = false;
+
+    if (!this.settings.hasMigratedAnalyzeDiagramAction) {
+      if (!this.settings.enabledActions.includes('analyze-diagram')) {
+        this.settings.enabledActions.push('analyze-diagram');
+      }
+      this.settings.hasMigratedAnalyzeDiagramAction = true;
+      changed = true;
+    }
+
     const mapLegacyModel = (value?: string): VisionInsightsSettings['preferredModel'] => {
       switch (value) {
         case 'gpt-5-mini':
@@ -116,14 +131,23 @@ export default class VisionInsightsPlugin extends Plugin {
       }
     };
 
-    this.settings.preferredModel = mapLegacyModel(this.settings.preferredModel);
+    const migratedPreferred = mapLegacyModel(this.settings.preferredModel);
+    if (migratedPreferred !== this.settings.preferredModel) {
+      this.settings.preferredModel = migratedPreferred;
+      changed = true;
+    }
 
-    if (!this.settings.perActionConfig) return;
+    if (!this.settings.perActionConfig) return changed;
     for (const actionKey of Object.keys(this.settings.perActionConfig) as VisionAction[]) {
       const actionConfig = this.settings.perActionConfig[actionKey];
       if (!actionConfig?.model) continue;
-      actionConfig.model = mapLegacyModel(actionConfig.model);
+      const migratedModel = mapLegacyModel(actionConfig.model);
+      if (migratedModel !== actionConfig.model) {
+        actionConfig.model = migratedModel;
+        changed = true;
+      }
     }
+    return changed;
   }
 
   registerContextMenus(): void {

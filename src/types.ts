@@ -6,6 +6,7 @@ export type VisionAction =
   | 'analyze-structure'
   | 'quick-insights'
   | 'analyze-data-viz'
+  | 'analyze-diagram'
   | 'extract-meeting-participants'
   | 'analyze-meeting-content'
   | 'custom-vision';
@@ -48,6 +49,7 @@ export interface VisionInsightsSettings {
   openaiApiKey: string;
   preferredModel: VisionModel;
   enabledActions: VisionAction[];
+  hasMigratedAnalyzeDiagramAction?: boolean;
   defaultInsertionMode: InsertionMode;
   cacheResults: boolean;
   maxCacheAge: number; // in hours

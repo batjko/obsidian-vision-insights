@@ -1,6 +1,7 @@
 import { App, Modal, Editor, MarkdownView, Setting, Notice, MarkdownRenderer } from 'obsidian';
 import { AnalysisResult, InsertionMode } from './types';
 import VisionInsightsPlugin from '../main';
+import { ACTIONS } from './action-config';
 
 export class ResultsModal extends Modal {
   private result: AnalysisResult;
@@ -85,15 +86,17 @@ export class ResultsModal extends Modal {
 
     // Action buttons
     const buttonContainer = contentEl.createDiv('button-container');
+    const defaultMode = this.getDefaultInsertionMode();
+    const defaultLabel = this.getInsertionButtonLabel(defaultMode);
     
     // Primary actions (top row)
     const primaryRow = buttonContainer.createDiv('button-row');
     
     new Setting(primaryRow)
       .addButton(btn => btn
-        .setButtonText('Insert at Cursor')
+        .setButtonText(`${defaultLabel} (Default)`)
         .setCta()
-        .onClick(() => this.insertResult('cursor')))
+        .onClick(() => this.insertResult(defaultMode)))
       .addButton(btn => btn
         .setButtonText('Copy to Clipboard')
         .onClick(() => this.copyToClipboard()));
@@ -131,6 +134,7 @@ export class ResultsModal extends Modal {
       'analyze-structure': 'Structure Analysis',
       'quick-insights': 'Quick Insights',
       'analyze-data-viz': 'Data Visualization Analysis',
+      'analyze-diagram': 'Diagram Analysis + Mermaid',
       'extract-meeting-participants': 'Meeting Participants',
       'analyze-meeting-content': 'Meeting Content Analysis',
       'custom-vision': 'Custom Vision'
@@ -197,9 +201,31 @@ export class ResultsModal extends Modal {
       'generate-description': 'note',
       'identify-text': 'quote',
       'analyze-structure': 'tip',
-      'quick-insights': 'example'
+      'quick-insights': 'example',
+      'analyze-diagram': 'tip'
     };
     return calloutTypes[action] || 'info';
+  }
+
+  private getDefaultInsertionMode(): InsertionMode {
+    const perActionDefault = this.plugin.settings.perActionConfig?.[this.result.action]?.defaultInsertionMode;
+    if (perActionDefault) return perActionDefault;
+    if (this.plugin.settings.defaultInsertionMode) return this.plugin.settings.defaultInsertionMode;
+    return ACTIONS[this.result.action]?.defaultInsertionMode ?? 'cursor';
+  }
+
+  private getInsertionButtonLabel(mode: InsertionMode): string {
+    const labels: Record<InsertionMode, string> = {
+      cursor: 'Insert at Cursor',
+      quote: 'Insert as Quote',
+      callout: 'Insert as Callout',
+      'new-note': 'Save to New Note',
+      'daily-note': 'Append to Daily Note',
+      'above-image': 'Insert Above Image',
+      'below-image': 'Insert Below Image',
+      'replace-image-callout': 'Replace Image with Callout'
+    };
+    return labels[mode];
   }
 
   private insertRelativeToImage(position: 'above' | 'below') {

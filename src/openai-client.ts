@@ -52,7 +52,8 @@ export class OpenAIClient {
   ): Promise<{ content: string; modelUsed: string; tokens?: number }> {
     const perAction = this.settings.perActionConfig?.[action] || {};
     const model = overrideModel || perAction.model || this.settings.preferredModel;
-    const maxTokens = this.settings.maxOutputTokens ?? 1500;
+    const baseMaxTokens = this.settings.maxOutputTokens ?? 1500;
+    const maxTokens = action === 'analyze-diagram' ? Math.max(baseMaxTokens, 8512) : baseMaxTokens;
     const detail = perAction.imageDetail || 'auto';
 
     let response: any;
@@ -66,13 +67,40 @@ export class OpenAIClient {
             { type: 'input_image', image_url: imageData, detail }
           ]
         }],
+        reasoning: { effort: 'low' },
         max_output_tokens: maxTokens
       });
     } catch (error) {
       throw this.toDetailedError(error, `image request (${model})`);
     }
 
-    const content = this.extractTextContent(response);
+    let content = this.extractTextContent(response);
+    if (!content && this.isMaxOutputTokenIncomplete(response)) {
+      const retryMaxTokens = Math.min(maxTokens + 1200, 4000);
+      if (retryMaxTokens > maxTokens) {
+        try {
+          response = await this.client.responses.create({
+            model,
+            input: [{
+              role: 'user',
+              content: [
+                {
+                  type: 'input_text',
+                  text: `${prompt}\n\nIMPORTANT: Keep output concise and ensure you return final markdown content, including the Mermaid block when requested.`
+                },
+                { type: 'input_image', image_url: imageData, detail }
+              ]
+            }],
+            reasoning: { effort: 'low' },
+            max_output_tokens: retryMaxTokens
+          });
+          content = this.extractTextContent(response);
+        } catch (error) {
+          throw this.toDetailedError(error, `image retry request (${model})`);
+        }
+      }
+    }
+
     if (!content) throw this.createMissingContentError(response, model, 'image request');
 
     return {
@@ -204,6 +232,10 @@ export class OpenAIClient {
       }
     }
     return 'none';
+  }
+
+  private isMaxOutputTokenIncomplete(response: any): boolean {
+    return response?.status === 'incomplete' && response?.incomplete_details?.reason === 'max_output_tokens';
   }
 
   private extractTotalTokens(response: any): number | undefined {
