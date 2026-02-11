@@ -38,19 +38,37 @@ Vision Insights is an Obsidian plugin that brings AI-powered image analysis dire
 
 ## Installation
 
-### Via Obsidian Community Plugins (once available)
+> This plugin is currently installed manually (not in the Community Plugin store yet).
 
-1. Open Obsidian Settings
-2. Go to **Community Plugins** and disable **Safe Mode**
-3. Click **Browse** and search for "Vision Insights"
-4. Install and enable the plugin
+### Easiest: Install via BRAT (recommended)
 
-### Manual Installation
+1. In Obsidian, install **BRAT** (Beta Reviewers Auto-update Tester) from Community Plugins
+2. Open **BRAT** settings and click **Add Beta plugin**
+3. Paste this repository URL: `https://github.com/batjko/obsidian-vision-insights`
+4. Choose **vision-insights**, then enable it in Community Plugins
 
-1. Download the latest release from the [releases page](https://github.com/batjko/obsidian-vision-insights/releases)
-2. Extract the files to your vault's plugins folder: `VaultFolder/.obsidian/plugins/vision-insights/`
-3. Reload Obsidian and enable the plugin in Community Plugins
-4. Add your OpenAI API key in the settings and enable whichever context actions you want.
+This gives users one-click updates from new GitHub releases.
+
+### Manual Installation (zip package)
+
+1. Download `vision-insights-<version>.zip` from the [latest release](https://github.com/batjko/obsidian-vision-insights/releases/latest)
+2. Unzip it
+3. Copy `manifest.json`, `main.js`, and optional `styles.css` into: `VaultFolder/.obsidian/plugins/vision-insights/`
+4. Reload Obsidian and enable **Vision Insights** in Community Plugins
+5. Add your OpenAI API key in plugin settings
+
+### Manual Installation (direct files)
+
+If you prefer not to use the zip package, download these release assets directly:
+- `manifest.json`
+- `main.js`
+- `styles.css` (if present)
+
+Copy them into `VaultFolder/.obsidian/plugins/vision-insights/` and reload Obsidian.
+
+### Updating to a New Version
+
+For manual installs, replace files in `VaultFolder/.obsidian/plugins/vision-insights/` with the latest release assets and reload Obsidian.
 
 ### Development Installation
 
@@ -220,9 +238,15 @@ npm run release:major   # For breaking changes (1.0.0 → 2.0.0)
 The release script will:
 1. Bump the version in `package.json`, `manifest.json`, and `versions.json`
 2. Build the plugin
-3. Commit and tag the changes
-4. Push to GitHub
-5. Create a GitHub release with the built assets
+3. Create installable assets (`main.js`, `manifest.json`, optional `styles.css`, and `vision-insights-<version>.zip`)
+4. Commit and tag the changes
+5. Push to GitHub
+6. Create/update a GitHub release with those assets
+
+Pre-flight checks:
+- Requires a clean working tree (no uncommitted changes)
+- Fails if local branch is behind remote
+- Requires authenticated GitHub CLI (`gh auth status`)
 
 **Manual Release**
 If you need to release the current version without bumping:

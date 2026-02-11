@@ -54,27 +54,11 @@ async function checkGitStatus() {
     const status = execCommand('git status --porcelain', true);
     if (status) {
       const lines = status.split('\n').filter(line => line.trim());
-      warning(`Working directory has ${lines.length} uncommitted change(s).`);
+      error(`Working directory has ${lines.length} uncommitted change(s). Commit or stash them before releasing.`);
     }
     success('Git status check passed');
   } catch (err) {
     error('Failed to check git status');
-  }
-}
-
-function commitAllPendingChanges() {
-  const status = execCommand('git status --porcelain', true);
-  if (!status) {
-    info('No pending changes to commit before version bump');
-    return;
-  }
-  info('Committing pending changes before version bump...');
-  try {
-    execCommand('git add -A');
-    execCommand('git commit -m "chore: pre-release commit of pending changes"');
-    success('Committed pending changes');
-  } catch (err) {
-    error('Failed to commit pending changes');
   }
 }
 
@@ -192,11 +176,7 @@ function checkRemoteSync() {
     // Check if local is ahead of remote
     const ahead = execCommand(`git rev-list --count origin/${currentBranch}..HEAD`, true);
     if (parseInt(ahead) > 0) {
-      warning(`Local branch is ${ahead} commits ahead of remote. Will push changes.`);
-      
-      info('Pushing changes to remote...');
-      execCommand('git push origin ' + currentBranch);
-      success('Changes pushed to remote');
+      warning(`Local branch is ${ahead} commits ahead of remote. These commits will be pushed during release.`);
     } else {
       success('Local branch is up to date with remote');
     }
@@ -226,6 +206,15 @@ function checkGitHubCLI() {
   }
 }
 
+function checkZipCLI() {
+  try {
+    execCommand('zip -v', true);
+    success('zip CLI is available');
+  } catch (err) {
+    error('zip CLI is required to package release assets. Please install zip and try again.');
+  }
+}
+
 function buildPlugin() {
   info('Building plugin...');
   try {
@@ -252,6 +241,32 @@ function checkRequiredFiles() {
   
   success(`Required files found: ${existingFiles.join(', ')}`);
   return existingFiles;
+}
+
+function createReleaseArchive(version, assetFiles) {
+  const archiveName = `vision-insights-${version}.zip`;
+  info(`Creating release archive ${archiveName}...`);
+
+  try {
+    const archiveDir = path.join('dist', `vision-insights-${version}`);
+    fs.rmSync(archiveDir, { recursive: true, force: true });
+    fs.mkdirSync(archiveDir, { recursive: true });
+
+    for (const file of assetFiles) {
+      const sourcePath = path.resolve(file);
+      const targetPath = path.join(archiveDir, path.basename(file));
+      fs.copyFileSync(sourcePath, targetPath);
+    }
+
+    const archivePath = path.join('dist', archiveName);
+    fs.rmSync(archivePath, { force: true });
+    execCommand(`cd dist && zip -r "${archiveName}" "vision-insights-${version}"`, true);
+
+    success(`Created release archive at ${archivePath}`);
+    return archivePath;
+  } catch (err) {
+    error(`Failed to create release archive: ${err.message}`);
+  }
 }
 
 function createGitHubRelease(version, assetFiles) {
@@ -298,10 +313,9 @@ async function main(directVersionType) {
   
   // Pre-flight checks
   checkGitHubCLI();
+  checkZipCLI();
   await checkGitStatus();
   checkRemoteSync();
-  // Ensure all work is committed prior to version bump
-  commitAllPendingChanges();
   
   // Version management
   const versionType = directVersionType || await promptForVersionType();
@@ -311,6 +325,8 @@ async function main(directVersionType) {
   buildPlugin();
   updateVersionsFile(version);
   const assetFiles = checkRequiredFiles();
+  const releaseArchive = createReleaseArchive(version, assetFiles);
+  const releaseAssets = [...assetFiles, releaseArchive];
   
   // Commit version changes
   if (versionType !== 'skip') {
@@ -319,13 +335,14 @@ async function main(directVersionType) {
     execCommand(`git commit -m "chore: bump version to ${version}"`);
     execCommand(`git tag v${version}`);
     // Push any pre-release commits and version bump together
-    execCommand('git push origin main');
+    const currentBranch = execCommand('git branch --show-current', true);
+    execCommand(`git push origin ${currentBranch}`);
     execCommand('git push origin --tags');
     success('Version changes committed and tagged');
   }
   
   // Create release
-  createGitHubRelease(version, assetFiles);
+  createGitHubRelease(version, releaseAssets);
   
   log('🎉 Release process completed successfully!', 'green');
   log(`\nNext steps:`, 'blue');
