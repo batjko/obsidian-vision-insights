@@ -1,4 +1,4 @@
-import { App, TFile, Editor, MarkdownView } from 'obsidian';
+import { App, TFile, Editor, MarkdownView, FileSystemAdapter } from 'obsidian';
 import { VisionInsightsSettings, ImageInfo, NoteContext } from './types';
 import { arrayBufferToBase64, getMimeType } from './utils';
 
@@ -140,11 +140,37 @@ export class ImageHandler {
         };
       } else if (src.startsWith('app://')) {
         const url = new URL(src);
-        // Pathname is like /<vault-id>/path/to/image.png. We want the part after the vault id.
-        const path = decodeURIComponent(url.pathname).split('/').slice(2).join('/');
-        const file = this.app.vault.getAbstractFileByPath(path);
-        if (file instanceof TFile) {
-          return this.createImageInfoFromFile(file);
+        const decodedPath = decodeURIComponent(url.pathname || '');
+        const trimmedPath = decodedPath.replace(/^\/+/, '');
+
+        const candidates = new Set<string>();
+        if (trimmedPath) {
+          candidates.add(trimmedPath);
+          const withoutFirstSegment = trimmedPath.split('/').slice(1).join('/');
+          if (withoutFirstSegment) candidates.add(withoutFirstSegment);
+        }
+
+        // Some renderers produce app:// URLs with absolute filesystem paths.
+        const adapter = this.app.vault.adapter;
+        if (adapter instanceof FileSystemAdapter) {
+          const basePath = adapter.getBasePath().replace(/\\/g, '/').replace(/\/+$/, '');
+          const normalizedDecodedPath = decodedPath.replace(/\\/g, '/');
+          const normalizedTrimmedPath = trimmedPath.replace(/\\/g, '/');
+
+          if (normalizedDecodedPath.startsWith(basePath + '/')) {
+            candidates.add(normalizedDecodedPath.slice(basePath.length + 1));
+          } else if (normalizedTrimmedPath.startsWith(basePath + '/')) {
+            candidates.add(normalizedTrimmedPath.slice(basePath.length + 1));
+          }
+        }
+
+        for (const candidate of candidates) {
+          const vaultPath = candidate.replace(/^\/+/, '').replace(/\\/g, '/');
+          if (!vaultPath) continue;
+          const file = this.app.vault.getAbstractFileByPath(vaultPath);
+          if (file instanceof TFile) {
+            return this.createImageInfoFromFile(file);
+          }
         }
       }
     } catch (error) {

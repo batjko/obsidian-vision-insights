@@ -184,10 +184,34 @@ var ImageHandler = class {
         };
       } else if (src.startsWith("app://")) {
         const url = new URL(src);
-        const path2 = decodeURIComponent(url.pathname).split("/").slice(2).join("/");
-        const file = this.app.vault.getAbstractFileByPath(path2);
-        if (file instanceof import_obsidian.TFile) {
-          return this.createImageInfoFromFile(file);
+        const decodedPath = decodeURIComponent(url.pathname || "");
+        const trimmedPath = decodedPath.replace(/^\/+/, "");
+        const candidates = /* @__PURE__ */ new Set();
+        if (trimmedPath) {
+          candidates.add(trimmedPath);
+          const withoutFirstSegment = trimmedPath.split("/").slice(1).join("/");
+          if (withoutFirstSegment)
+            candidates.add(withoutFirstSegment);
+        }
+        const adapter = this.app.vault.adapter;
+        if (adapter instanceof import_obsidian.FileSystemAdapter) {
+          const basePath = adapter.getBasePath().replace(/\\/g, "/").replace(/\/+$/, "");
+          const normalizedDecodedPath = decodedPath.replace(/\\/g, "/");
+          const normalizedTrimmedPath = trimmedPath.replace(/\\/g, "/");
+          if (normalizedDecodedPath.startsWith(basePath + "/")) {
+            candidates.add(normalizedDecodedPath.slice(basePath.length + 1));
+          } else if (normalizedTrimmedPath.startsWith(basePath + "/")) {
+            candidates.add(normalizedTrimmedPath.slice(basePath.length + 1));
+          }
+        }
+        for (const candidate of candidates) {
+          const vaultPath = candidate.replace(/^\/+/, "").replace(/\\/g, "/");
+          if (!vaultPath)
+            continue;
+          const file = this.app.vault.getAbstractFileByPath(vaultPath);
+          if (file instanceof import_obsidian.TFile) {
+            return this.createImageInfoFromFile(file);
+          }
         }
       }
     } catch (error) {
@@ -7418,11 +7442,12 @@ var ResultsModal = class extends import_obsidian2.Modal {
 > 
 > *Source: ${this.result.imageInfo.filename}*`);
           break;
-        case "callout":
+        case "callout": {
           const calloutType = this.getCalloutType(this.result.action);
           this.editor.replaceSelection(`> [!${calloutType}] ${this.getActionTitle(this.result.action)}
 > ${formattedContent.replace(/\n/g, "\n> ")}`);
           break;
+        }
         case "new-note":
           await this.createNewNote();
           break;
@@ -7924,6 +7949,7 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
     this.lastRequestTime = 0;
+    this.contextMenuDebugEnabled = false;
   }
   async onload() {
     console.log("Vision Insights: Loading Plugin...");
@@ -7941,6 +7967,11 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
         id: "test-vision-analysis",
         name: "Test Vision Analysis",
         callback: () => new import_obsidian5.Notice("Vision Insights plugin loaded successfully!")
+      });
+      this.addCommand({
+        id: "toggle-context-menu-debug",
+        name: "Vision: Toggle Context Menu Debug Logging",
+        callback: () => this.toggleContextMenuDebugLogging()
       });
       this.addCommand({
         id: "analyze-all-images-in-note",
@@ -8002,7 +8033,14 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
     this.registerEvent(
       this.app.workspace.on(
         "editor-menu",
-        this.handleEditorMenu.bind(this)
+        (menu, editor, view) => {
+          this.debugContextMenu("editor-menu fired");
+          if (!(view instanceof import_obsidian5.MarkdownView)) {
+            this.debugContextMenu("editor-menu ignored: non-MarkdownView context");
+            return;
+          }
+          this.handleEditorMenu(menu, editor, view);
+        }
       )
     );
     this.registerEvent(
@@ -8010,6 +8048,7 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
         "file-menu",
         (menu, file) => {
           if (file instanceof import_obsidian5.TFile && file.extension.match(/^(png|jpg|jpeg|gif|webp|bmp|tiff)$/i)) {
+            this.debugContextMenu("file-menu fired", { filePath: file.path });
             const imageInfo = this.imageHandler.createImageInfoFromFile(file);
             if (imageInfo) {
               const activeView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
@@ -8018,6 +8057,15 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
               }
             }
           }
+        }
+      )
+    );
+    this.registerEvent(
+      this.app.workspace.on(
+        "url-menu",
+        (menu, url) => {
+          this.debugContextMenu("url-menu fired", { url });
+          this.handleUrlMenu(menu, url);
         }
       )
     );
@@ -8050,25 +8098,62 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
       this.addVisionMenuItems(menu, imageInfo, editor, view);
     }
   }
-  handleRenderedImageContextMenu(event) {
-    var _a3;
-    const target = event.target;
-    if (!(target instanceof HTMLElement))
+  handleUrlMenu(menu, url) {
+    const activeView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
+    if (!activeView) {
+      this.debugContextMenu("url-menu ignored: no active markdown view", { url });
       return;
+    }
+    const imageInfo = this.resolveImageInfoFromUrl(url, activeView);
+    if (!imageInfo) {
+      this.debugContextMenu("url-menu url did not resolve to image", { url });
+      return;
+    }
+    this.debugContextMenu("url-menu resolved image", { path: imageInfo.path, isExternal: imageInfo.isExternal });
+    this.addVisionMenuItems(menu, imageInfo, activeView.editor, activeView);
+  }
+  handleRenderedImageContextMenu(event) {
+    var _a3, _b;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      this.debugContextMenu("dom contextmenu ignored: target not HTMLElement");
+      return;
+    }
+    const composedPath = event.composedPath();
+    const pathImage = composedPath.find((node) => node instanceof HTMLImageElement);
     const closestImage = target.closest("img");
     const anchorImage = (_a3 = target.closest("a")) == null ? void 0 : _a3.querySelector("img");
     const imageElement = closestImage || anchorImage;
-    if (!(imageElement instanceof HTMLImageElement))
+    const resolvedImageElement = imageElement || pathImage;
+    if (!(resolvedImageElement instanceof HTMLImageElement)) {
+      this.debugContextMenu("dom contextmenu ignored: no image element in target/path", {
+        targetTag: target.tagName,
+        targetClass: target.className
+      });
       return;
-    const isInMarkdownView = !!imageElement.closest(".markdown-preview-view, .markdown-source-view");
-    if (!isInMarkdownView)
+    }
+    const isInMarkdownView = !!resolvedImageElement.closest(".markdown-preview-view, .markdown-source-view");
+    if (!isInMarkdownView) {
+      this.debugContextMenu("dom contextmenu ignored: image not in markdown view");
       return;
+    }
     const activeView = this.app.workspace.getActiveViewOfType(import_obsidian5.MarkdownView);
-    if (!activeView)
+    if (!activeView) {
+      this.debugContextMenu("dom contextmenu ignored: no active markdown view");
       return;
-    const imageInfo = this.resolveRenderedImageInfo(imageElement, activeView);
-    if (!imageInfo)
+    }
+    const imageInfo = this.resolveRenderedImageInfo(resolvedImageElement, activeView);
+    if (!imageInfo) {
+      this.debugContextMenu("dom contextmenu image could not be resolved", {
+        currentSrc: resolvedImageElement.currentSrc,
+        src: resolvedImageElement.src,
+        dataSrc: resolvedImageElement.dataset.src,
+        dataHref: resolvedImageElement.dataset.href,
+        anchorHref: (_b = resolvedImageElement.closest("a")) == null ? void 0 : _b.href
+      });
       return;
+    }
+    this.debugContextMenu("dom contextmenu resolved image", { path: imageInfo.path, isExternal: imageInfo.isExternal });
     event.preventDefault();
     event.stopPropagation();
     const menu = new import_obsidian5.Menu();
@@ -8087,16 +8172,44 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
     ].filter(Boolean);
     for (const source of sourceCandidates) {
       const directImageInfo = this.imageHandler.createImageInfoFromSrc(source);
-      if (directImageInfo)
+      if (directImageInfo) {
+        this.debugContextMenu("resolved image from src candidate", { source, path: directImageInfo.path });
         return directImageInfo;
+      }
       const normalizedPath = this.extractInternalImagePath(source);
       if (!normalizedPath)
         continue;
       const internalImageInfo = this.imageHandler.createImageInfo(normalizedPath, view);
-      if (internalImageInfo)
+      if (internalImageInfo) {
+        this.debugContextMenu("resolved image from normalized path", { source, normalizedPath, path: internalImageInfo.path });
         return internalImageInfo;
+      }
     }
     return null;
+  }
+  resolveImageInfoFromUrl(url, view) {
+    const source = url == null ? void 0 : url.trim();
+    if (!source) {
+      this.debugContextMenu("resolveImageInfoFromUrl skipped: empty url");
+      return null;
+    }
+    const fromSrc = this.imageHandler.createImageInfoFromSrc(source);
+    if (fromSrc) {
+      this.debugContextMenu("resolveImageInfoFromUrl: createImageInfoFromSrc success", { source, path: fromSrc.path });
+      return fromSrc;
+    }
+    const normalizedPath = this.extractInternalImagePath(source);
+    if (!normalizedPath) {
+      this.debugContextMenu("resolveImageInfoFromUrl: normalized path not available", { source });
+      return null;
+    }
+    const resolved = this.imageHandler.createImageInfo(normalizedPath, view);
+    this.debugContextMenu("resolveImageInfoFromUrl: normalized path attempted", {
+      source,
+      normalizedPath,
+      resolved: !!resolved
+    });
+    return resolved;
   }
   extractInternalImagePath(rawSource) {
     const source = rawSource.trim();
@@ -8118,6 +8231,20 @@ var VisionInsightsPlugin = class extends import_obsidian5.Plugin {
     } catch (e) {
       return withoutLeadingSlash;
     }
+  }
+  toggleContextMenuDebugLogging() {
+    this.contextMenuDebugEnabled = !this.contextMenuDebugEnabled;
+    new import_obsidian5.Notice(`Vision Insights context menu debug ${this.contextMenuDebugEnabled ? "enabled" : "disabled"}.`);
+    this.debugContextMenu("debug logging toggled", { enabled: this.contextMenuDebugEnabled });
+  }
+  debugContextMenu(message, data) {
+    if (!this.contextMenuDebugEnabled)
+      return;
+    if (data) {
+      console.log(`[Vision Insights][ContextMenuDebug] ${message}`, data);
+      return;
+    }
+    console.log(`[Vision Insights][ContextMenuDebug] ${message}`);
   }
   addVisionMenuItems(menu, imageInfo, editor, view) {
     if (!this.settings.enabledActions.length)

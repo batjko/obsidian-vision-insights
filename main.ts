@@ -36,6 +36,7 @@ export default class VisionInsightsPlugin extends Plugin {
   resultsModal!: ResultsModal;
   cacheManager!: CacheManager;
   private lastRequestTime: number = 0;
+  private contextMenuDebugEnabled: boolean = false;
 
   async onload(): Promise<void> {
     console.log('Vision Insights: Loading Plugin...');
@@ -58,6 +59,11 @@ export default class VisionInsightsPlugin extends Plugin {
         id: 'test-vision-analysis',
         name: 'Test Vision Analysis',
         callback: () => new Notice('Vision Insights plugin loaded successfully!')
+      });
+      this.addCommand({
+        id: 'toggle-context-menu-debug',
+        name: 'Vision: Toggle Context Menu Debug Logging',
+        callback: () => this.toggleContextMenuDebugLogging()
       });
       this.addCommand({
         id: 'analyze-all-images-in-note',
@@ -124,7 +130,14 @@ export default class VisionInsightsPlugin extends Plugin {
     this.registerEvent(
       this.app.workspace.on(
         'editor-menu',
-        this.handleEditorMenu.bind(this)
+        (menu, editor, view) => {
+          this.debugContextMenu('editor-menu fired');
+          if (!(view instanceof MarkdownView)) {
+            this.debugContextMenu('editor-menu ignored: non-MarkdownView context');
+            return;
+          }
+          this.handleEditorMenu(menu, editor, view);
+        }
       )
     );
 
@@ -136,6 +149,7 @@ export default class VisionInsightsPlugin extends Plugin {
             file instanceof TFile &&
             file.extension.match(/^(png|jpg|jpeg|gif|webp|bmp|tiff)$/i)
           ) {
+            this.debugContextMenu('file-menu fired', { filePath: file.path });
             const imageInfo: ImageInfo | null = this.imageHandler.createImageInfoFromFile(file);
             if (imageInfo) {
               const activeView: MarkdownView | null = this.app.workspace.getActiveViewOfType(MarkdownView);
@@ -144,6 +158,16 @@ export default class VisionInsightsPlugin extends Plugin {
               }
             }
           }
+        }
+      )
+    );
+
+    this.registerEvent(
+      this.app.workspace.on(
+        'url-menu',
+        (menu: Menu, url: string) => {
+          this.debugContextMenu('url-menu fired', { url });
+          this.handleUrlMenu(menu, url);
         }
       )
     );
@@ -179,24 +203,69 @@ export default class VisionInsightsPlugin extends Plugin {
     }
   }
 
+  private handleUrlMenu(menu: Menu, url: string): void {
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!activeView) {
+      this.debugContextMenu('url-menu ignored: no active markdown view', { url });
+      return;
+    }
+
+    const imageInfo = this.resolveImageInfoFromUrl(url, activeView);
+    if (!imageInfo) {
+      this.debugContextMenu('url-menu url did not resolve to image', { url });
+      return;
+    }
+
+    this.debugContextMenu('url-menu resolved image', { path: imageInfo.path, isExternal: imageInfo.isExternal });
+    this.addVisionMenuItems(menu, imageInfo, activeView.editor, activeView);
+  }
+
   private handleRenderedImageContextMenu(event: MouseEvent): void {
     const target = event.target;
-    if (!(target instanceof HTMLElement)) return;
+    if (!(target instanceof HTMLElement)) {
+      this.debugContextMenu('dom contextmenu ignored: target not HTMLElement');
+      return;
+    }
 
+    const composedPath = event.composedPath();
+    const pathImage = composedPath.find((node) => node instanceof HTMLImageElement);
     const closestImage = target.closest('img');
     const anchorImage = target.closest('a')?.querySelector('img');
     const imageElement = closestImage || anchorImage;
-    if (!(imageElement instanceof HTMLImageElement)) return;
+    const resolvedImageElement = imageElement || pathImage;
+    if (!(resolvedImageElement instanceof HTMLImageElement)) {
+      this.debugContextMenu('dom contextmenu ignored: no image element in target/path', {
+        targetTag: target.tagName,
+        targetClass: target.className
+      });
+      return;
+    }
 
-    const isInMarkdownView = !!imageElement.closest('.markdown-preview-view, .markdown-source-view');
-    if (!isInMarkdownView) return;
+    const isInMarkdownView = !!resolvedImageElement.closest('.markdown-preview-view, .markdown-source-view');
+    if (!isInMarkdownView) {
+      this.debugContextMenu('dom contextmenu ignored: image not in markdown view');
+      return;
+    }
 
     const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
-    if (!activeView) return;
+    if (!activeView) {
+      this.debugContextMenu('dom contextmenu ignored: no active markdown view');
+      return;
+    }
 
-    const imageInfo = this.resolveRenderedImageInfo(imageElement, activeView);
-    if (!imageInfo) return;
+    const imageInfo = this.resolveRenderedImageInfo(resolvedImageElement, activeView);
+    if (!imageInfo) {
+      this.debugContextMenu('dom contextmenu image could not be resolved', {
+        currentSrc: resolvedImageElement.currentSrc,
+        src: resolvedImageElement.src,
+        dataSrc: resolvedImageElement.dataset.src,
+        dataHref: resolvedImageElement.dataset.href,
+        anchorHref: resolvedImageElement.closest('a')?.href
+      });
+      return;
+    }
 
+    this.debugContextMenu('dom contextmenu resolved image', { path: imageInfo.path, isExternal: imageInfo.isExternal });
     event.preventDefault();
     event.stopPropagation();
 
@@ -218,15 +287,49 @@ export default class VisionInsightsPlugin extends Plugin {
 
     for (const source of sourceCandidates) {
       const directImageInfo = this.imageHandler.createImageInfoFromSrc(source);
-      if (directImageInfo) return directImageInfo;
+      if (directImageInfo) {
+        this.debugContextMenu('resolved image from src candidate', { source, path: directImageInfo.path });
+        return directImageInfo;
+      }
 
       const normalizedPath = this.extractInternalImagePath(source);
       if (!normalizedPath) continue;
       const internalImageInfo = this.imageHandler.createImageInfo(normalizedPath, view);
-      if (internalImageInfo) return internalImageInfo;
+      if (internalImageInfo) {
+        this.debugContextMenu('resolved image from normalized path', { source, normalizedPath, path: internalImageInfo.path });
+        return internalImageInfo;
+      }
     }
 
     return null;
+  }
+
+  private resolveImageInfoFromUrl(url: string, view: MarkdownView): ImageInfo | null {
+    const source = url?.trim();
+    if (!source) {
+      this.debugContextMenu('resolveImageInfoFromUrl skipped: empty url');
+      return null;
+    }
+
+    const fromSrc = this.imageHandler.createImageInfoFromSrc(source);
+    if (fromSrc) {
+      this.debugContextMenu('resolveImageInfoFromUrl: createImageInfoFromSrc success', { source, path: fromSrc.path });
+      return fromSrc;
+    }
+
+    const normalizedPath = this.extractInternalImagePath(source);
+    if (!normalizedPath) {
+      this.debugContextMenu('resolveImageInfoFromUrl: normalized path not available', { source });
+      return null;
+    }
+
+    const resolved = this.imageHandler.createImageInfo(normalizedPath, view);
+    this.debugContextMenu('resolveImageInfoFromUrl: normalized path attempted', {
+      source,
+      normalizedPath,
+      resolved: !!resolved
+    });
+    return resolved;
   }
 
   private extractInternalImagePath(rawSource: string): string | null {
@@ -247,6 +350,21 @@ export default class VisionInsightsPlugin extends Plugin {
     } catch {
       return withoutLeadingSlash;
     }
+  }
+
+  private toggleContextMenuDebugLogging(): void {
+    this.contextMenuDebugEnabled = !this.contextMenuDebugEnabled;
+    new Notice(`Vision Insights context menu debug ${this.contextMenuDebugEnabled ? 'enabled' : 'disabled'}.`);
+    this.debugContextMenu('debug logging toggled', { enabled: this.contextMenuDebugEnabled });
+  }
+
+  private debugContextMenu(message: string, data?: Record<string, unknown>): void {
+    if (!this.contextMenuDebugEnabled) return;
+    if (data) {
+      console.log(`[Vision Insights][ContextMenuDebug] ${message}`, data);
+      return;
+    }
+    console.log(`[Vision Insights][ContextMenuDebug] ${message}`);
   }
 
   addVisionMenuItems(

@@ -7,7 +7,7 @@ export class ResultsModal extends Modal {
   private editor: Editor;
   private view: MarkdownView;
 
-  constructor(app: App, private plugin: VisionInsightsPlugin) {
+  constructor(app: App, private readonly plugin: VisionInsightsPlugin) {
     super(app);
   }
 
@@ -151,10 +151,11 @@ export class ResultsModal extends Modal {
           this.editor.replaceSelection(`> ${formattedContent.replace(/\n/g, '\n> ')}\n> \n> *Source: ${this.result.imageInfo.filename}*`);
           break;
           
-        case 'callout':
+        case 'callout': {
           const calloutType = this.getCalloutType(this.result.action);
           this.editor.replaceSelection(`> [!${calloutType}] ${this.getActionTitle(this.result.action)}\n> ${formattedContent.replace(/\n/g, '\n> ')}`);
           break;
+        }
           
         case 'new-note':
           await this.createNewNote();
