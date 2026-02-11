@@ -20,6 +20,11 @@ export type InsertionMode =
   | 'below-image'
   | 'replace-image-callout';
 
+export type VisionModel =
+  | 'gpt-5-mini'
+  | 'gpt-5-nano'
+  | 'gpt-5.2';
+
 export interface NoteContext {
   textBefore: string;
   textAfter: string;
@@ -41,7 +46,7 @@ export interface NoteContext {
 
 export interface VisionInsightsSettings {
   openaiApiKey: string;
-  preferredModel: 'gpt-4.1-mini' | 'gpt-4o-mini' | 'gpt-4o';
+  preferredModel: VisionModel;
   enabledActions: VisionAction[];
   defaultInsertionMode: InsertionMode;
   cacheResults: boolean;
@@ -53,7 +58,7 @@ export interface VisionInsightsSettings {
   includeImageLink?: boolean; // include link to image on insert
   // Per-action behavior overrides
   perActionConfig?: Partial<Record<VisionAction, {
-    model?: 'gpt-4.1-mini' | 'gpt-4o-mini' | 'gpt-4o';
+    model?: VisionModel;
     temperature?: number;
     imageDetail?: 'low' | 'auto' | 'high';
     defaultInsertionMode?: InsertionMode;

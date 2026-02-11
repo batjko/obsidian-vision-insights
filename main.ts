@@ -10,7 +10,7 @@ import { ACTIONS } from './src/action-config';
 
 const DEFAULT_SETTINGS: VisionInsightsSettings = {
   openaiApiKey: '',
-  preferredModel: 'gpt-4.1-mini',
+  preferredModel: 'gpt-5-mini',
   enabledActions: [
     'smart-summary',
     'extract-facts',
@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS: VisionInsightsSettings = {
     'analyze-meeting-content',
     'custom-vision'
   ],
-  defaultInsertionMode: 'cursor',
+  defaultInsertionMode: 'below-image',
   cacheResults: true,
   maxCacheAge: 24,
   rateLimitDelay: 500
@@ -84,6 +84,7 @@ export default class VisionInsightsPlugin extends Plugin {
 
   async loadSettings(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    this.migrateLegacyModels();
   }
 
   async saveSettings(): Promise<void> {
@@ -94,6 +95,28 @@ export default class VisionInsightsPlugin extends Plugin {
     }
     if (this.imageHandler) {
       this.imageHandler.updateSettings(this.settings);
+    }
+  }
+
+  private migrateLegacyModels(): void {
+    const mapLegacyModel = (value?: string): VisionInsightsSettings['preferredModel'] => {
+      switch (value) {
+        case 'gpt-5-mini':
+        case 'gpt-5-nano':
+        case 'gpt-5.2':
+          return value;
+        default:
+          return 'gpt-5-mini';
+      }
+    };
+
+    this.settings.preferredModel = mapLegacyModel(this.settings.preferredModel);
+
+    if (!this.settings.perActionConfig) return;
+    for (const actionKey of Object.keys(this.settings.perActionConfig) as VisionAction[]) {
+      const actionConfig = this.settings.perActionConfig[actionKey];
+      if (!actionConfig?.model) continue;
+      actionConfig.model = mapLegacyModel(actionConfig.model);
     }
   }
 
@@ -124,6 +147,13 @@ export default class VisionInsightsPlugin extends Plugin {
         }
       )
     );
+
+    this.registerDomEvent(
+      document,
+      'contextmenu',
+      (event: MouseEvent) => this.handleRenderedImageContextMenu(event),
+      { capture: true }
+    );
   }
 
   addCommandPaletteCommands(): void {
@@ -146,6 +176,76 @@ export default class VisionInsightsPlugin extends Plugin {
     const imageInfo: ImageInfo | null = await this.imageHandler.detectImageAtCursor(editor, view);
     if (imageInfo) {
       this.addVisionMenuItems(menu, imageInfo, editor, view);
+    }
+  }
+
+  private handleRenderedImageContextMenu(event: MouseEvent): void {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    const closestImage = target.closest('img');
+    const anchorImage = target.closest('a')?.querySelector('img');
+    const imageElement = closestImage || anchorImage;
+    if (!(imageElement instanceof HTMLImageElement)) return;
+
+    const isInMarkdownView = !!imageElement.closest('.markdown-preview-view, .markdown-source-view');
+    if (!isInMarkdownView) return;
+
+    const activeView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    if (!activeView) return;
+
+    const imageInfo = this.resolveRenderedImageInfo(imageElement, activeView);
+    if (!imageInfo) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menu = new Menu();
+    this.addVisionMenuItems(menu, imageInfo, activeView.editor, activeView);
+    menu.showAtMouseEvent(event);
+  }
+
+  private resolveRenderedImageInfo(imageElement: HTMLImageElement, view: MarkdownView): ImageInfo | null {
+    const anchorElement = imageElement.closest('a');
+    const sourceCandidates: string[] = [
+      imageElement.currentSrc,
+      imageElement.src,
+      imageElement.dataset.src || '',
+      imageElement.dataset.href || '',
+      anchorElement?.href || '',
+      anchorElement?.dataset.href || ''
+    ].filter(Boolean);
+
+    for (const source of sourceCandidates) {
+      const directImageInfo = this.imageHandler.createImageInfoFromSrc(source);
+      if (directImageInfo) return directImageInfo;
+
+      const normalizedPath = this.extractInternalImagePath(source);
+      if (!normalizedPath) continue;
+      const internalImageInfo = this.imageHandler.createImageInfo(normalizedPath, view);
+      if (internalImageInfo) return internalImageInfo;
+    }
+
+    return null;
+  }
+
+  private extractInternalImagePath(rawSource: string): string | null {
+    const source = rawSource.trim();
+    if (!source) return null;
+
+    if (/^(data|blob|javascript|mailto):/i.test(source)) return null;
+    if (/^https?:\/\//i.test(source)) return null;
+    if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(source)) return null;
+
+    const withoutHash = source.split('#')[0];
+    const withoutQuery = withoutHash.split('?')[0];
+    const withoutLeadingSlash = withoutQuery.replace(/^\/+/, '').replace(/^\.\//, '');
+    if (!withoutLeadingSlash) return null;
+
+    try {
+      return decodeURIComponent(withoutLeadingSlash);
+    } catch {
+      return withoutLeadingSlash;
     }
   }
 
@@ -197,10 +297,13 @@ export default class VisionInsightsPlugin extends Plugin {
     view: MarkdownView,
     customPrompt?: string
   ): Promise<void> {
+    const loadingNotice = new Notice(
+      `Analyzing image with ${action.replace(/-/g, ' ')}...`,
+      0
+    );
+
     try {
       await this.enforceRateLimit();
-
-      new Notice(`Analyzing image with ${action.replace(/-/g, ' ')}...`);
 
       // Extract note context around the image
       const noteContext = this.imageHandler.extractNoteContext(editor, view, imageInfo);
@@ -247,6 +350,8 @@ export default class VisionInsightsPlugin extends Plugin {
     } catch (error: any) {
       console.error('Vision analysis error:', error);
       new Notice(`Error analyzing image: ${error.message}`);
+    } finally {
+      loadingNotice.hide();
     }
   }
 
@@ -271,6 +376,7 @@ export default class VisionInsightsPlugin extends Plugin {
   }
 
   private async analyzeAllImagesInNote(view: MarkdownView) {
+    let loadingNotice: Notice | null = null;
     try {
       const editor = view.editor;
       const images = this.imageHandler.extractAllImagesInNote(editor, view);
@@ -287,7 +393,10 @@ export default class VisionInsightsPlugin extends Plugin {
       const usingCustom = !!(customPrompt && customPrompt.trim());
       const overallAction: VisionAction = usingCustom ? 'custom-vision' : 'extract-facts';
 
-      new Notice(`Analyzing ${images.length} image(s)${usingCustom ? ' with custom instructions' : ' for key information'}…`);
+      loadingNotice = new Notice(
+        `Analyzing ${images.length} image(s)${usingCustom ? ' with custom instructions' : ' for key information'}…`,
+        0
+      );
 
       const analyses: Array<{ filename: string; content: string }> = [];
       let lastModel: string | undefined;
@@ -309,7 +418,8 @@ export default class VisionInsightsPlugin extends Plugin {
         analyses.push({ filename: imageInfo.filename, content });
       }
 
-      new Notice('Consolidating results…');
+      loadingNotice.hide();
+      loadingNotice = new Notice('Consolidating results…', 0);
       const firstContext = images[0]?.noteContext;
       const consolidated = await this.openaiClient.consolidateAnalyses(analyses, overallAction, firstContext, customPrompt || undefined);
 
@@ -328,6 +438,8 @@ export default class VisionInsightsPlugin extends Plugin {
     } catch (e: any) {
       console.error(e);
       new Notice(`Error: ${e.message}`);
+    } finally {
+      loadingNotice?.hide();
     }
   }
 }

@@ -58,11 +58,11 @@ export class VisionInsightsSettingTab extends PluginSettingTab {
       // Model Selection
       new Setting(containerEl)
         .setName('Preferred Model')
-        .setDesc('Choose the OpenAI model for image analysis. GPT-4.1 mini is recommended for best performance.')
+        .setDesc('Choose the OpenAI model for image analysis. GPT-5 mini is recommended for best performance.')
         .addDropdown(dropdown => dropdown
-          .addOption('gpt-4.1-mini', 'GPT-4.1 Mini (Recommended)')
-          .addOption('gpt-4o-mini', 'GPT-4o Mini')
-          .addOption('gpt-4o', 'GPT-4o (Premium)')
+          .addOption('gpt-5-mini', 'GPT-5 Mini (Recommended)')
+          .addOption('gpt-5-nano', 'GPT-5 Nano (Fastest)')
+          .addOption('gpt-5.2', 'GPT-5.2 (Premium)')
           .setValue(this.plugin.settings.preferredModel)
           .onChange(async (value) => {
             this.plugin.settings.preferredModel = value as any;
@@ -163,6 +163,7 @@ export class VisionInsightsSettingTab extends PluginSettingTab {
           .addOption('callout', 'As Callout')
           .addOption('new-note', 'Create New Note')
           .addOption('daily-note', 'Append to Daily Note')
+          .addOption('below-image', 'Insert Below Image')
           .setValue(this.plugin.settings.defaultInsertionMode)
           .onChange(async (value) => {
             this.plugin.settings.defaultInsertionMode = value as any;
@@ -278,9 +279,9 @@ export class VisionInsightsSettingTab extends PluginSettingTab {
           .setDesc('Use a specific model for this action')
           .addDropdown(drop => drop
             .addOption('', 'Default')
-            .addOption('gpt-4.1-mini', 'GPT-4.1 Mini')
-            .addOption('gpt-4o-mini', 'GPT-4o Mini')
-            .addOption('gpt-4o', 'GPT-4o')
+            .addOption('gpt-5-mini', 'GPT-5 Mini')
+            .addOption('gpt-5-nano', 'GPT-5 Nano')
+            .addOption('gpt-5.2', 'GPT-5.2')
             .setValue((cfg.model as any) ?? '')
             .onChange(async (value) => {
               cfg.model = (value || undefined) as any;

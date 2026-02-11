@@ -32,7 +32,7 @@ Vision Insights is an Obsidian plugin that brings AI-powered image analysis dire
 
 - **Intelligent Caching** - Avoid repeat API calls with configurable cache duration and LRU cap
 - **Rate Limiting** - Built-in request throttling to prevent API limits
-- **Model Selection** - Choose between GPT-4.1 Mini, GPT-4o Mini, or GPT-4o
+- **Model Selection** - Choose between GPT-5 Mini, GPT-5 Nano, and GPT-5.2
 - **Batch Processing** - Analyze all images in the current note and aggregate results
 - **Optional Downscaling** - Reduce large image sizes before upload to save cost/time
 
@@ -118,7 +118,7 @@ npm run build
 ### API Settings
 
 - **OpenAI API Key** - Your OpenAI API key for vision analysis
-- **Preferred Model** - Choose between GPT-4.1 Mini (recommended), GPT-4o Mini, or GPT-4o
+- **Preferred Model** - Choose between GPT-5 Mini (recommended), GPT-5 Nano, and GPT-5.2
 - **Test Connection** - Verify API key validity
 
 ### Analysis Actions
@@ -257,7 +257,7 @@ node scripts/release.mjs skip
 
 **Slow analysis**
 - Check internet connection
-- Consider using faster model (GPT-4.1 Mini)
+- Consider using faster model (GPT-5 Nano)
 - Adjust rate limiting settings if needed
 
 ## Privacy & Security
